@@ -1049,11 +1049,12 @@ while (1) {
 
 					// imgur via api
 					// single image post ids are usually accessible as an image rather than an album so first check if an image then an album
-					if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?(\w+)(?:/(\w+))?#', $u, $m)) {
+					if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?([\w-]+)(?:/([\w-]+))?#', $u, $m)) {
 						echo "getting from imgur api..\n";
 						if (!empty($m[3])) $id = $m[3]; else $id = $m[2];
+						$id = end(explode('-', $id));
 						$r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/image/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
-						if (empty($r)) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/album/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
+						if (empty($r) || $r->status == 404) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/album/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
 						if (!empty($r) && !empty($r->data->section) && empty($r->data->title) && empty($r->data->description)) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/gallery/r/{$r->data->section}/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]])); // subreddit image. title and desc may always be empty but included to be safe
 						if (!empty($r) && $r->success == 1) {
 							// for i.* direct links default to image description, else default to post title
@@ -1070,8 +1071,17 @@ while (1) {
 							if (!empty($o)) {
 								$o = "[ $o ]";
 								send("PRIVMSG $channel :$title_bold$o$title_bold\n");
-							} else echo (!empty($m[1]) ? 'image' : 'post') . " exists but no description, skipping output\n";
-							continue(2);
+								continue(2);
+							} else {
+								// skip output unless ai image titles and (if not jpg/png) scrapingbee enabled (for i.imgur.com) and single image
+								if (!empty($ai_image_titles_enabled) && isset($r->data->type) && isset($r->data->link) && (preg_match('#image/(?:jpeg|png)#', $r->data->type) || (preg_match('#image/(?:webp|avif|gif)#', $r->data->type) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($r->data->link, PHP_URL_HOST), $scrapingbee_hosts))))) {
+									$u = $r->data->link;
+									$parse_url = parse_url($u);
+								} else {
+									echo (!empty($m[1]) ? 'image' : 'post') . " exists but no description, skipping output\n";
+									continue(2);
+								}
+							}
 						}
 					}
 
@@ -1905,7 +1915,8 @@ while (1) {
 							continue(2);
 						}
 					} else {
-						if (!empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array($parse_url['host'], $scrapingbee_hosts))) $html = curlget([CURLOPT_URL => 'https://scrapingbee.p.rapidapi.com/?url=' . urlencode($u) . '&render_js=true', CURLOPT_HTTPHEADER => ['x-rapidapi-host: scrapingbee.p.rapidapi.com', 'x-rapidapi-key: ' . $rapidapi_key], CURLOPT_TIMEOUT => 31]); else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
+						if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1]);
+						else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
 					}
 					// echo "response[2048/".strlen($html)."]=".print_r(substr($html,0,2048),true)."\n";
 					if (empty($html)) {
@@ -2055,7 +2066,14 @@ while (1) {
 
 function curlget($opts = [], $more_opts = [])
 {
-	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts;
+	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
+
+	if (isset($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
+		$opts[CURLOPT_URL] = 'https://scrapingbee.p.rapidapi.com/?url=' . urlencode($opts[CURLOPT_URL]) . '&render_js=true';
+		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-host: scrapingbee.p.rapidapi.com';
+		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-key: ' . $rapidapi_key;
+		$opts[CURLOPT_TIMEOUT] = 31;
+	}
 
 	// determine interface
 	if ($proxy_by_host_enabled && in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $proxy_by_hosts)) $set_iface = $proxy_by_host_iface;
@@ -2812,9 +2830,9 @@ function get_ai_image_title($url, $image_data = null, $mime = null)
 	global $ai_image_titles_key, $ai_image_titles_baseurl, $ai_image_titles_model, $ai_image_titles_prompt, $ai_image_titles_dl_hosts, $parse_url, $curl_error;
 	$orig_url = $url;
 
-	if (!preg_match("#^https?://i\.imgur\.com/#", $url) && (!preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png)$#i", $url) || (!empty($ai_image_titles_dl_hosts) && ($ai_image_titles_dl_hosts == "all" || in_array($parse_url['host'], $ai_image_titles_dl_hosts))))) { // downloading imgur doesn't work, but ai can get them. skip urls with image extension
+	if (!preg_match("#^https?://i\.imgur\.com/\w+?\.(?:jpg|jpeg|png)#", $url) && (!preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png)$#i", $url) || (!empty($ai_image_titles_dl_hosts) && ($ai_image_titles_dl_hosts == "all" || in_array($parse_url['host'], $ai_image_titles_dl_hosts))))) { // downloading imgur doesn't work, but ai can get them. skip urls with image extension
 		if (!$image_data) {
-			$image_data = curlget([CURLOPT_URL => $url]); // get image rather than pass url
+			$image_data = curlget([CURLOPT_URL => $url], ['scrapingbee_support' => 1]); // get image rather than pass url
 			if (empty($image_data)) {
 				if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
 					echo "get_ai_image_title ($orig_url): Timeout getting image\n";
