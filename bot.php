@@ -132,7 +132,7 @@ if ($title_cache_enabled) {
 	init_title_cache();
 }
 $title_bold = !empty($title_bold) ? "\x02" : '';
-if (!empty($twitter_nitter_enabled) && empty($twitter_nitter_instance)) $twitter_nitter_instance = 'https://nitter.privacydev.net';
+if (!empty($twitter_nitter_enabled) && empty($twitter_nitter_instance)) $twitter_nitter_instance = 'https://nitter.net';
 if (!empty($nitter_links_via_twitter)) {
 	$nitter_hosts_time = 0;
 	$nitter_hosts = "";
@@ -1029,7 +1029,7 @@ while (1) {
 				}
 				$parse_url = parse_url($u);
 				// replace nitter hosts so they're processed as twitter
-				if (!empty($nitter_links_via_twitter) && !empty($nitter_hosts)) $u = preg_replace("#^https://$nitter_hosts#", 'https://twitter.com', $u);
+				if (!empty($nitter_links_via_twitter) && !empty($nitter_hosts)) if (preg_match("#^https://(?:\w+?\.)?$nitter_hosts/pic/(?:orig/)?(?:\w+/)?(.*)#", $u, $m)) $u = 'https://pbs.twimg.com/' . preg_replace('#&format=\w+$#', '', urldecode($m[1])); else $u = preg_replace("#^https://$nitter_hosts/#", 'https://x.com/', $u);
 				// title cache
 				if ($title_cache_enabled) {
 					$r = get_from_title_cache($u);
