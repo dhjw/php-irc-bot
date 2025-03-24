@@ -2068,11 +2068,13 @@ function curlget($opts = [], $more_opts = [])
 {
 	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
 
+	$is_scrapingbee = false;
 	if (isset($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
 		$opts[CURLOPT_URL] = 'https://scrapingbee.p.rapidapi.com/?url=' . urlencode($opts[CURLOPT_URL]) . '&render_js=true';
 		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-host: scrapingbee.p.rapidapi.com';
 		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-key: ' . $rapidapi_key;
 		$opts[CURLOPT_TIMEOUT] = 31;
+		$is_scrapingbee = true;
 	}
 
 	// determine interface
@@ -2142,6 +2144,8 @@ function curlget($opts = [], $more_opts = [])
 		$curl_error = curl_error($ch);
 		curl_close($ch);
 	}
+
+	if ($is_scrapingbee && $curl_info['RESPONSE_CODE'] <> 200) echo "ScrapingBee error: " . trim($curl_response) . "\n";
 
 	// both methods
 	if (parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_HOST) == 'consent.youtube.com') {
