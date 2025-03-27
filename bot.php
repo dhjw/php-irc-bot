@@ -1234,11 +1234,14 @@ while (1) {
 						}
 					}
 
-					// get final url for reddit share urls
-					if (preg_match("#^https://(?:\w+\.)?reddit.com/r/[^/]*?/s/#", $u, $m)) $u = get_final_url($u);
+					// reddit get media url
+					if (preg_match("#^https://(?:\w+\.)?reddit\.com/media#", $u)) {
+						parse_str($parse_url["query"], $tmp);
+						if (!empty($tmp["url"])) $u = $tmp["url"];
+					}
 
 					// reddit auth
-					if (!empty($reddit_app_id) && (preg_match("#^https://(?:\w+\.)?reddit.com/#", $u) || preg_match("#^https://(?:\w+\.)?redd.it/#", $u))) {
+					if (!empty($reddit_app_id) && (preg_match("#^https://(?:\w+\.)?reddit\.com/#", $u) || preg_match("#^https://(?:\w+\.)?redd\.it/#", $u))) {
 						if (empty($reddit_token) || $time >= $reddit_token_expires - 30) {
 							$j = json_decode(curlget([
 								CURLOPT_CUSTOMREQUEST => "POST",
@@ -1254,9 +1257,13 @@ while (1) {
 								echo "Error getting Reddit token: " . print_r($j, true) . "\n";
 							}
 						}
-						// update reddit url - appears safe to do universally and not just where we add authorization header
-						if ($reddit_token) $u = preg_replace('#^https://(?:\w+\.)?reddit.com#', 'https://oauth.reddit.com', $u);
 					}
+
+					// reddit share urls - get final url
+					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/[^/]*?/s/#", $u, $m)) $u = get_final_url($u, ['header' => [$reddit_token ? "Authorization: Bearer $reddit_token" : ""]]);
+
+					// reddit authed - use oauth subdomain
+					if ($reddit_token) $u = preg_replace('#^https://(?:\w+\.)?reddit\.com#', 'https://oauth.reddit.com', $u);
 
 					// reddit image
 					if (strpos($u, '.redd.it/') !== false) {
@@ -1275,7 +1282,7 @@ while (1) {
 					}
 
 					// reddit comment
-					if (preg_match("#^https://(?:\w+\.)?reddit.com/r/.*?/comments/.*?/.*?/([^/?]+)#", $u, $m)) {
+					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/.*?/.*?/([^/?]+)#", $u, $m)) {
 						if (strpos($m[1], '?') !== false) $m[1] = substr($m[1], 0, strpos($m[1], '?')); // id
 						$m[1] = rtrim($m[1], '/');
 						echo "getting reddit comment. id=$m[1]\n";
@@ -1309,7 +1316,7 @@ while (1) {
 					}
 
 					// reddit title
-					if (preg_match("#^https://(?:\w+\.)?reddit.com/r/.*?/comments/[^/?]+#", $u, $m)) {
+					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/[^/?]+#", $u, $m)) {
 						echo "getting reddit post title\n";
 						if (strpos($u, '?') !== false) $u = substr($u, 0, strpos($u, '?'));
 						for ($i = 2; $i > 0; $i--) { // 2 tries
@@ -1333,7 +1340,7 @@ while (1) {
 					}
 
 					// reddit general - ignore quarantine
-					if (preg_match("#^https://(?:\w+\.)?reddit.com/r/#", $u)) $header = ["Cookie: _options={%22pref_quarantine_optin%22:true}"];
+					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/#", $u)) $header = ["Cookie: _options={%22pref_quarantine_optin%22:true}"];
 
 					// imdb
 					if (preg_match('#https?://(?:www.)?imdb.com/title/(tt\d*)/?(?:\?.*?)?$#', $u, $m)) {
@@ -1435,7 +1442,7 @@ while (1) {
 									}
 									if (substr($m2[1], 0, 1) == '/') $m2[1] = "https://x.com$m2[1]";
 									// shorten displayed link if possible, add hint if needed
-									$fu = get_final_url($m2[1], true);
+									$fu = get_final_url($m2[1], ['no_body' => 1]);
 									// if link same as quote-link and at end of tweet, remove it
 									if ($fu == $qh) {
 										$b = rtrim(preg_replace("#$m2[0]$#", '', $b));
@@ -1620,7 +1627,7 @@ while (1) {
 									foreach ($m[0] as $v) {
 										preg_match('#<a href="([^"]*)".*>(.*)</a>#', $v, $m2); // m2[0] full anchor [1] href [2] text
 										// shorten displayed link if possible, add hint if needed
-										$fu = get_final_url($m2[1], true);
+										$fu = get_final_url($m2[1], ['no_body' => 1]);
 										$s = make_short_url($fu);
 										if (mb_strlen($s) < mb_strlen($m2[1])) $m2[1] = $s;
 										$h = get_url_hint($fu);
@@ -2069,7 +2076,7 @@ function curlget($opts = [], $more_opts = [])
 	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
 
 	$is_scrapingbee = false;
-	if (isset($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
+	if (!empty($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
 		$opts[CURLOPT_URL] = 'https://scrapingbee.p.rapidapi.com/?url=' . urlencode($opts[CURLOPT_URL]) . '&render_js=true';
 		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-host: scrapingbee.p.rapidapi.com';
 		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-key: ' . $rapidapi_key;
@@ -2374,11 +2381,14 @@ function get_url_hint($u)
 	return get_base_domain(parse_url($u, PHP_URL_HOST));
 }
 
-function get_final_url($u, $no_body = false)
+function get_final_url($u, $more_opts = ['no_body' => false, 'header' => []])
 {
 	global $curl_info;
-	if ($no_body) curlget([CURLOPT_URL => $u, CURLOPT_NOBODY => 1]);
-	else curlget([CURLOPT_URL => $u]); // nobody failed for e.g. http://help.urbanup.com/14769269
+	curlget([
+		CURLOPT_URL => $u,
+		CURLOPT_NOBODY => $more_opts['no_body'] ? 1 : 0, // nobody failed for e.g. http://help.urbanup.com/14769269
+		CURLOPT_HTTPHEADER => $more_opts['header']
+	]);
 	return !empty($curl_info['EFFECTIVE_URL']) ? $curl_info['EFFECTIVE_URL'] : $u;
 }
 
