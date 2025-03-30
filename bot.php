@@ -1085,6 +1085,21 @@ while (1) {
 						}
 					}
 
+					// imgbb, get direct link for ai
+					if (!empty($ai_image_titles_enabled) && preg_match('#^https?://(?:ibb\.co|imgbb\.com)/\w+$#', $u)) {
+						echo "Getting direct link for AI... ";
+						$dom = new DOMDocument();
+						if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . curlget([CURLOPT_URL => $u]))) {
+							$list = $dom->getElementsByTagName('input');
+							foreach ($list as $l) if (!empty($l->attributes->getNamedItem('id')) && $l->attributes->getNamedItem('id')->value == 'embed-code-3') { // use medium-sized image for speed. id is one less than when logged-in
+								preg_match('#\[img](.*)\[/img]#', $l->attributes->getNamedItem('value')->value, $m);
+								$u = $m[1];
+								break;
+							}
+						}
+						echo "$u\n";
+					}
+
 					// youtube via api, w/invidious mirror support
 					invidious:
 					if (!empty($youtube_api_key)) {
