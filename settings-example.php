@@ -24,6 +24,7 @@ $short_url_service = ''; # tiny.cc, tinyurl, bit.ly, da.gd
 $short_url_token = ''; # for tiny.cc use 'username:apiKey'. can be array for rotation
 $gcloud_translate_keyfile = ''; // e.g. translate.json, per step 1 at https://cloud.google.com/translate/docs/getting-started, put in current folder
 $gcloud_translate_max_chars = 50000; // per month, see https://cloud.google.com/translate/pricing
+$auto_translate_titles = true; // auto-translate non-english link titles if page has <html lang=> attribute (requires $gcloud_translate_keyfile)
 $imgur_client_id = '';
 $currencylayer_key = '';
 $omdb_key = '';

@@ -39,7 +39,7 @@ if (!empty($omdb_key)) $helptxt .= " !m <query or IMDb id e.g. tt123456> - searc
 if (!empty($currencylayer_key)) $helptxt .= " !cc <amount> <from_currency> <to_currency> - currency converter\n";
 if (!empty($wolfram_appid)) $helptxt .= " !wa <query> - query Wolfram Alpha\n";
 $helptxt .= " !ud <term> [definition #] - query Urban Dictionary with optional definition number\n";
-if (!empty($gcloud_translate_keyfile)) $helptxt .= " !tr <string> or e.g. !tr en-fr <string> - translate text to english or between other languages. see https://bit.ly/iso639-1\n";
+if (!empty($gcloud_translate_keyfile)) $helptxt .= " !tr <text> or e.g. !tr en-fr <text> - translate text to english or between other languages. see https://bit.ly/iso639-1\n";
 $helptxt .= " !flip - flip a coin (call heads or tails first!)
  !rand <min> <max> [num] - get random numbers with optional number of numbers
  !8 or !8ball - magic 8-ball\n";
@@ -817,45 +817,42 @@ while (1) {
 				if ($tmp->Type == 'movie') $tmp3 = ''; else $tmp3 = " $tmp->Type";
 				if (isset($tmp->Response)) send("PRIVMSG $privto :\xe2\x96\xb6 $tmp->Title ($tmp->Year$tmp3) | $tmp->Genre | $tmp->Actors | \"$tmp->Plot\" https://www.imdb.com/title/$tmp->imdbID/ [$tmp->imdbRating]\n"); else send("PRIVMSG $privto :OMDB API error.\n");
 				continue;
-			} elseif ($trigger == '!tr' || $trigger == '!translate') {
-				// google translate, requires gcloud commandline tool to be installed
-				echo "Translating.. ";
-				// check limit
-				$ym = date("Y-m");
-				if (!isset($botdata->translate_char_cnt)) $botdata->translate_char_cnt = new stdClass();
-				if (!isset($botdata->translate_char_cnt->{$ym})) $botdata->translate_char_cnt->{$ym} = 0;
-				echo "quota=" . $botdata->translate_char_cnt->{$ym} . "/$gcloud_translate_max_chars\n";
-				if ($botdata->translate_char_cnt->{$ym} + strlen($args) > $gcloud_translate_max_chars) {
-					send("PRIVMSG $privto :Monthly translate limit exceeded\n");
-					continue;
-				}
-				// get a token
-				passthru("gcloud auth activate-service-account --key-file=$gcloud_translate_keyfile");
-				$tmp2 = rtrim(shell_exec("gcloud auth print-access-token"));
+			} elseif (!empty($gcloud_translate_keyfile) && ($trigger == '!tr' || $trigger == '!translate')) {
 				$words = explode(' ', $args);
 				if (strpos($words[0], '-') !== false && strlen($words[0]) == 5) {
-					list($source, $target) = explode('-', $words[0]);
-					if ($source == 'jp') $source = 'ja';
-					if ($target == 'jp') $target = 'ja';
+					list($from_lang, $to_lang) = explode('-', $words[0]);
 					unset($words[0]);
 					$words = array_values($words);
 					$args = implode(' ', $words);
-					$lang = get_lang($source) . " to " . get_lang($target);
+					$is_auto = false;
 				} else {
-					$source = '';
-					$target = 'en';
+					$from_lang = '';
+					$to_lang = 'en';
+					$is_auto = true;
 				}
-				$tmp = json_encode(['q' => $args, 'source' => $source, 'target' => $target]);
-				$tmp = curlget([CURLOPT_URL => 'https://translation.googleapis.com/language/translate/v2', CURLOPT_CUSTOMREQUEST => 'POST', CURLOPT_POSTFIELDS => $tmp, CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $tmp2]]);
-				$tmp = json_decode($tmp);
-				if (isset($tmp->data->translations[0])) {
-					if (isset($tmp->data->translations[0]->detectedSourceLanguage)) $lang = get_lang($tmp->data->translations[0]->detectedSourceLanguage);
-					send("PRIVMSG $privto :($lang) " . html_entity_decode($tmp->data->translations[0]->translatedText, ENT_QUOTES | ENT_HTML5, 'UTF-8') . "\n");
+				if (empty($args)) {
+					send("PRIVMSG $privto :Usage: !tr <text> or e.g. !tr en-fr <text> (see https://bit.ly/iso639-1)\n");
+					continue;
+				} elseif (!$is_auto) {
+					if (get_lang($from_lang) == 'Unknown' || get_lang($to_lang) == 'Unknown') {
+						$e = [];
+						if (get_lang($from_lang) == 'Unknown') $e[] = $from_lang;
+						if (get_lang($to_lang) == 'Unknown') $e[] = $to_lang;
+						send("PRIVMSG $privto :Unknown language code" . (count($e) > 1 ? 's' : " \"{$e[0]}\"") . ". See https://bit.ly/iso639-1\n");
+						continue;
+					} elseif ($from_lang == $to_lang) {
+						send("PRIVMSG $privto :From and to language codes must be different. See https://bit.ly/iso639-1\n");
+						continue;
+					}
+				}
+				$r = google_translate(['text' => $args, 'from_lang' => $from_lang, 'to_lang' => $to_lang]);
+				if (isset($r->text)) {
+					if ($is_auto) $out = "(" . get_lang($r->from_lang) . ") $r->text";
+					else $out = "(" . get_lang($r->from_lang) . " to " . get_lang($r->to_lang) . ") $r->text";
+					send("PRIVMSG $privto :$out\n");
 				} else {
 					send("PRIVMSG $privto :Could not translate.\n");
 				}
-				$botdata->translate_char_cnt->{$ym} += strlen($args);
-				file_put_contents($datafile, json_encode($botdata));
 				continue;
 			} elseif ($trigger == '!cc') {
 				// currency converter
@@ -1982,6 +1979,21 @@ while (1) {
 							$list = $dom->getElementsByTagName("title");
 							if ($list->length > 0) $title = $list->item(0)->textContent;
 						}
+
+						// auto translate title
+						if (!empty($auto_translate_titles) && !empty($gcloud_translate_keyfile) && !empty($title)) {
+							$h = $dom->getElementsByTagName('html')[0];
+							if (!empty($h) && !empty($h->attributes->getNamedItem('lang'))) {
+								$lc = strtolower(explode('-', $h->attributes->getNamedItem('lang')->value)[0]);
+								if ($lc <> 'en' && get_lang($lc) <> 'Unknown') {
+									$r = google_translate(['text' => $title, 'from_lang' => $lc, 'to_lang' => 'en']);
+									if (!empty($r->text) && !isset($r->error)) {
+										$l = make_short_url("https://translate.google.com/translate?js=n&sl=$lc&tl=en&u=" . urlencode($u));
+										$title = '(' . get_lang($lc) . ") $r->text (→EN: $l)";
+									}
+								}
+							}
+						}
 					}
 					$orig_title = $title;
 					// if potential invidious mirror rewrite URL and jump back to yt/invidious. if not an api URL will continue past here and parse already-fetched html. yewtu.be has a captcha so handle manually
@@ -2730,6 +2742,42 @@ function get_true_random($min = 1, $max = 100, $num = 1)
 	$r = curlget([CURLOPT_URL => "https://www.random.org/integers/?num=$num&min=$min&max=$max&col=1&base=10&format=plain&rnd=new"]);
 	$r = trim(str_replace("\n", ' ', $r));
 	return str_shorten($r);
+}
+
+// Google translate, requires gcloud commandline tool installed and $gcloud_translate_keyfile set
+function google_translate($opts = ['text' => '', 'from_lang' => '', 'to_lang' => ''])
+{
+	global $datafile, $botdata, $gcloud_translate_keyfile, $gcloud_translate_max_chars;
+	// check limit
+	$ym = date("Y-m");
+	if (!isset($botdata->translate_char_cnt)) $botdata->translate_char_cnt = new stdClass();
+	if (!isset($botdata->translate_char_cnt->{$ym})) $botdata->translate_char_cnt->{$ym} = 0;
+	echo "Translating (" . $botdata->translate_char_cnt->{$ym} . "/$gcloud_translate_max_chars" . ")...\n";
+	if ($botdata->translate_char_cnt->{$ym} + strlen($opts['text']) > $gcloud_translate_max_chars) {
+		$ret = new stdClass();
+		$ret->error = 'Monthly translate limit exceeded';
+		return $ret;
+	}
+	// get a token
+	passthru("gcloud auth activate-service-account --key-file=$gcloud_translate_keyfile");
+	$token = rtrim(shell_exec("gcloud auth print-access-token"));
+	$body = json_encode(['q' => $opts['text'], 'source' => $opts['from_lang'], 'target' => $opts['to_lang']]);
+	$orig_r = curlget([CURLOPT_URL => 'https://translation.googleapis.com/language/translate/v2', CURLOPT_CUSTOMREQUEST => 'POST', CURLOPT_POSTFIELDS => $body, CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $token]]);
+	$r = json_decode($orig_r);
+	if (isset($r->data->translations[0])) {
+		$botdata->translate_char_cnt->{$ym} += strlen($opts['text']);
+		file_put_contents($datafile, json_encode($botdata));
+		$ret = new stdClass();
+		$ret->text = html_entity_decode($r->data->translations[0]->translatedText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+		$ret->from_lang = isset($r->data->translations[0]->detectedSourceLanguage) ? $r->data->translations[0]->detectedSourceLanguage : $opts['from_lang'];
+		$ret->to_lang = $opts['to_lang'];
+		return $ret;
+	} else {
+		echo "Translation error." . (!empty($orig_r) ? " Response: $orig_r" : "") . "\n";
+		$ret = new stdClass();
+		$ret->error = true;
+		return $ret;
+	}
 }
 
 // ISO 639-1 Language Codes
