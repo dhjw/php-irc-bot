@@ -1677,6 +1677,89 @@ while (1) {
 						continue(2);
 					}
 
+					// bluesky
+					// TODO convert to at-uri without loading page?
+					if (preg_match('#^https?://bsky.app/profile/[^/]+/post/[^/]+#', $u)) {
+						$html = curlget([CURLOPT_URL => $u]);
+						if ($curl_info['RESPONSE_CODE'] == 200) {
+							$dom = new DomDocument();
+							@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
+							$f = new DomXPath($dom);
+							$n = $f->query("/html/head/link[starts-with(@href,'at://')]");
+							if (!empty($n) && $n->length > 0) {
+								$at = $n->item(0)->getAttribute('href');
+								// echo "found bluesky at-uri $at\n";
+								$r = @json_decode(curlget([CURLOPT_URL => "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=$at"]));
+								if (!empty($r)) {
+									// print_r($r);
+									if (isset($r->posts[0])) {
+										// clean up content
+										$b = $r->posts[0]->record->text;
+										$b = html_entity_decode($b, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+										$b = str_replace(["\r\n", "\n", "\t"], ' ', $b);
+										$b = str_replace('…', '...', $b);
+										$b = str_replace("‘", "'", str_replace("’", "'", $b));  # fancy quotes
+										$b = str_replace("“", '"', str_replace("”", '"', $b));
+										$b = preg_replace('#(?<!\w)(@[\w-]+?)\.[\w-]+(?:\.[\w-]+)*#', "$1", $b);
+										$b = preg_replace("/ +/", " ", $b);
+										$b = trim(preg_replace('/\s+/', ' ', $b));
+
+										// pre-finalize (TODO: process facet links first - see below)
+										$t = "{$r->posts[0]->author->displayName}: $b";
+										$t = str_shorten($t, mb_strlen($r->posts[0]->author->displayName) + 282); // + $hl
+										$ql = '';
+										if (!empty($r->posts[0]->record->embed)) {
+											$et = explode('.', $r->posts[0]->record->embed->{'$type'})[3];
+											if (($et == 'record' || $et == 'recordWithMedia') && strpos('/app.bsky.feed.post/', $r->posts[0]->record->embed->record->uri) !== -1) {
+												if (isset($r->posts[0]->record->embed->record->uri)) $uri = explode('/', $r->posts[0]->record->embed->record->uri);
+												else $uri = explode('/', $r->posts[0]->record->embed->record->record->uri);
+												$ql = ' (re: ' . make_short_url("https://bsky.app/profile/{$uri[2]}/post/{$uri[4]}") . ')';
+											}
+											if ($et == 'images' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->images))) {
+												if (isset($r->posts[0]->record->embed->images)) $n = count($r->posts[0]->record->embed->images);
+												else $n = count($r->posts[0]->record->embed->media->images);
+												$t = rtrim($t) . ' (' . ($n > 1 ? "$n " : '') . 'image' . ($n > 1 ? 's' : '') . ')';
+											}
+											if ($et == 'video' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->video))) {
+												$t = rtrim($t) . ' (video)';
+											}
+											if ($et == 'external' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->external))) {
+												if (isset($r->posts[0]->record->embed->external->uri)) $uri = $r->posts[0]->record->embed->external->uri;
+												else $uri = $r->posts[0]->record->embed->media->external->uri;
+
+												// if post text ends in part of the embed link, get rid of it
+												$tmp = explode(' ', $r->posts[0]->record->text);
+												$tmp = rtrim(trim($tmp[count($tmp) - 1]), '.');
+												$tmp2 = preg_replace('#^https?://#', '', $uri);
+												if (substr($tmp2, 0, strlen($tmp)) == $tmp) $t = trim(preg_replace('#' . preg_quote($tmp) . '\.+#', '', $t));
+
+												// add link at the end (post-shorten; not like twitter, etc)
+												$fu = get_final_url($uri, ['no_body' => 1]);
+												$s = make_short_url($fu);
+												if ($s <> $fu) {
+													$h = get_url_hint($fu);
+													if (mb_strlen("$s ($h)") < mb_strlen($fu)) $t = rtrim($t) . " $s ($h)";
+													else $t = rtrim($t) . " $fu";
+												} else $t = rtrim($t) . ' (link)'; // no short url, could be very long
+
+											}
+											// TODO facets, so mid-text / non-external embed links are processed properly, excluding duplicate externals. e.g. https://bsky.app/profile/propublica.org/post/3lmky7ypvhs2k https://bsky.app/profile/joshuajfriedman.com/post/3lmikawq2ds2j
+										}
+										$t = rtrim($t) . $ql; // add quote link, no hint
+										// finalize and output
+										$t = "[ $t ]";
+										send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+										if ($title_cache_enabled) add_to_title_cache($u, $t);
+										continue(2);
+									}
+								} else {
+									// post not found
+									echo "error reading bluesky post\n";
+								}
+							}
+						}
+					}
+
 					// tiktok
 					if (preg_match('#^https?://(?:www\.)?tiktok\.com/@[A-Za-z0-9._]+/video/\d+#', $u, $m)) {
 						$r = curlget([CURLOPT_URL => "https://www.tiktok.com/oembed?url=$m[0]"]);
