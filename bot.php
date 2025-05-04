@@ -2215,7 +2215,23 @@ function curlget($opts = [], $more_opts = [])
 		if (!empty($opts[CURLOPT_NOBODY])) $cmd .= ' -I';
 		$cmd .= ' ' . escapeshellarg($opts[CURLOPT_URL]);
 		// get stdout and stderr separately https://stackoverflow.com/a/25879953
-		$proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+		$tries = 0; // retry on rare error
+		while (1) {
+			$proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+			$tries++;
+			if (!is_resource($pipes[1]) || !is_resource($pipes[2])) {
+				if ($tries == 5) {
+					$curl_info = ['EFFECTIVE_URL' => $opts[CURLOPT_URL], 'RESPONSE_CODE' => 0];
+					$curl_error = 'proc_open error';
+					echo "Error: curl_impersonate max tries reached.\nstdout: " . print_r($pipes[1], true) . "\nstderr: " . print_r($pipes[2], true) . "\n";
+					return '';
+				}
+				echo "Error: curl_impersonate did not return a resource.\nstdout: " . print_r($pipes[1], true) . "\nstderr: " . print_r($pipes[2], true) . "\nretrying\n";
+				sleep(2);
+				continue;
+			}
+			break;
+		}
 		$curl_response = stream_get_contents($pipes[1]); // stdout
 		fclose($pipes[1]);
 		$info = json_decode(stream_get_contents($pipes[2])); // stderr
