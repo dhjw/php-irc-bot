@@ -1057,7 +1057,7 @@ while (1) {
 							// for i.* direct links default to image description, else default to post title
 							if (!empty($m[1])) if (!empty($r->data->description)) $d = $r->data->description; else $d = $r->data->title; else if (!empty($r->data->title)) $d = $r->data->title; else $d = $r->data->description;
 							// single image posts without an id the same as the first image (i.e. upload two images then delete one) should read first image description
-							if (empty($d) && !empty($r->data->is_album) && count($r->data->images) == 1) $d = $r->data->images[0]->description;
+							if (empty($d) && !empty($r->data->is_album) && isset($r->data->images) && is_array($r->data->images) && count($r->data->images) == 1) $d = $r->data->images[0]->description;
 							$o = !empty($r->data->nsfw) ? 'NSFW' : '';
 							if (!empty($d)) {
 								$d = str_replace(["\r", "\n", "\t"], ' ', $d);
