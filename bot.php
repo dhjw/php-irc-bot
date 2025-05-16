@@ -2010,15 +2010,15 @@ while (1) {
 					if (!empty($tor_enabled) && (preg_match('#^https?://.*?\.onion(?:$|/)#', $u) || !empty($tor_all))) {
 						echo "getting url title via tor\n";
 						/** @noinspection HttpUrlsUsage */
-						$html = curlget([CURLOPT_URL => $u, CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME, CURLOPT_PROXY => "$tor_host:$tor_port", CURLOPT_CONNECTTIMEOUT => 60, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => $header]);
+						$html = curlget([CURLOPT_URL => $u, CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME, CURLOPT_PROXY => "$tor_host:$tor_port", CURLOPT_CONNECTTIMEOUT => 60, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => $header], ['1MB_limit' => 1]);
 						if (empty($html)) {
 							if (strpos($curl_error, "Failed to connect to $tor_host port $tor_port") !== false) send("PRIVMSG $channel :Tor error - is it running?\n"); elseif (strpos($curl_error, "Connection timed out after") !== false) send("PRIVMSG $channel :Tor connection timed out\n");
 							// else send("PRIVMSG $channel :Tor error or site down\n");
 							continue(2);
 						}
 					} else {
-						if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1]);
-						else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
+						if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1, '1MB_limit' => 1]);
+						else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['1MB_limit' => 1]);
 					}
 					// echo "response[2048/".strlen($html)."]=".print_r(substr($html,0,2048),true)."\n";
 					if (empty($html)) {
@@ -2263,7 +2263,7 @@ function curlget($opts = [], $more_opts = [])
 		curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($handle, $data) {
 			global $curl_response;
 			$curl_response .= $data;
-			if (strlen($curl_response) > 1048576) { // up to 768KB required for amazon link titles
+			if (!empty($more_opts["1MB_limit"]) && strlen($curl_response) > 1048576) { // up to 768KB required for amazon link titles
 				echo "aborting download at 1MB\n";
 				return 0;
 			} else return strlen($data);
