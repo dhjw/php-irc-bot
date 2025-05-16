@@ -70,11 +70,12 @@ $scrapingbee_hosts = [ // set to 'all' or an array of hostnames. may not work fo
 	'archive.md',
 ];
 
-$ai_image_titles_enabled = false; // direct image link summaries/titles. does not override other apis
-$ai_image_titles_key = ''; // https://console.x.ai https://platform.openai.com
-$ai_image_titles_baseurl = 'https://api.x.ai/v1'; // https://api.openai.com/v1
-$ai_image_titles_model = 'grok-2-vision-latest'; // must be vision-capable https://docs.x.ai/docs/models https://platform.openai.com/docs/models
-$ai_image_titles_prompt = 'very short summary on one line. dont say "this image" or "the image". dont describe things as "outdated", "controversial" or "offensive". keep it short!';
+// direct image link summaries/titles. does not override other apis. currently only openai or x.ai supported as gemini doesn't accept urls which is bad for imgur bot protection
+$ai_image_titles_enabled = false;
+$ai_image_titles_key = ''; // https://platform.openai.com https://console.x.ai
+$ai_image_titles_baseurl = 'https://api.openai.com/v1'; // https://api.openai.com/v1 https://api.x.ai/v1
+$ai_image_titles_model = 'gpt-4o-mini'; // must be vision-capable https://platform.openai.com/docs/models (gpt-4o-mini/gpt-4.1-nano) https://docs.x.ai/docs/models (grok-2-vision)
+$ai_image_titles_prompt = 'very short summary on one line. dont describe it as an image. dont add unnecessary moral judgments like "outdated", "controversial" or "offensive". keep it short!';
 $ai_image_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url (except i.imgur.com)
 	'i.4pcdn.org',
 	'static-assets-1.truthsocial.com',
