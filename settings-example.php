@@ -49,7 +49,10 @@ $tor_host = '127.0.0.1';
 $tor_port = 9050;
 
 $curl_impersonate_enabled = false; // https://github.com/lwthiker/curl-impersonate
-$curl_impersonate_binary = '/usr/local/bin/curl_chrome110';
+$curl_impersonate_binary = '/usr/local/bin/curl_chrome116';
+$curl_impersonate_skip_hosts = [
+	'i.imgur.com' // imgur doesn't like curl-impersonate for direct image links
+];
 
 $proxy_by_host_enabled = false; // for e.g. evading extreme cloudflare protection when it blocks even with impersonate but you don't want to proxy everything using $curl_iface
 $proxy_by_host_iface = 'tun0'; // can be interface e.g. tun0 or ip

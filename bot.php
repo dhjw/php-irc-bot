@@ -2183,7 +2183,9 @@ while (1) {
 
 function curlget($opts = [], $more_opts = [])
 {
-	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
+	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
+
+	$parse_url = parse_url($opts[CURLOPT_URL]);
 
 	$is_scrapingbee = false;
 	if (!empty($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
@@ -2192,6 +2194,11 @@ function curlget($opts = [], $more_opts = [])
 		$opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-key: ' . $rapidapi_key;
 		$opts[CURLOPT_TIMEOUT] = 31;
 		$is_scrapingbee = true;
+	}
+
+	if ($curl_impersonate_enabled && !empty($curl_impersonate_skip_hosts) && in_array($parse_url['host'], $curl_impersonate_skip_hosts)) {
+		echo "skipping impersonate for host " . $parse_url['host'] . " in \$curl_impersonate_skip_hosts\n";
+		$more_opts['no_curl_impersonate'] = true;
 	}
 
 	// determine interface
@@ -3006,9 +3013,9 @@ function get_ai_image_title($url, $image_data = null, $mime = null)
 	global $ai_image_titles_key, $ai_image_titles_baseurl, $ai_image_titles_model, $ai_image_titles_prompt, $ai_image_titles_dl_hosts, $parse_url, $curl_error;
 	$orig_url = $url;
 
-	if (!preg_match("#^https?://i\.imgur\.com/\w+?\.(?:jpg|jpeg|png)#", $url) && (!preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png)$#i", $url) || (!empty($ai_image_titles_dl_hosts) && ($ai_image_titles_dl_hosts == "all" || in_array($parse_url['host'], $ai_image_titles_dl_hosts))))) { // downloading imgur doesn't work, but ai can get them. skip urls with image extension
+	if (!preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png)$#i", $url) || (!empty($ai_image_titles_dl_hosts) && ($ai_image_titles_dl_hosts == "all" || in_array($parse_url['host'], $ai_image_titles_dl_hosts)))) { // download to check mime type, convert, create data uri if necessary. skip urls with image extension
 		if (!$image_data) {
-			$image_data = curlget([CURLOPT_URL => $url], ['scrapingbee_support' => 1]); // get image rather than pass url
+			$image_data = curlget([CURLOPT_URL => $url], ['scrapingbee_support' => 1]);
 			if (empty($image_data)) {
 				if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
 					echo "get_ai_image_title ($orig_url): Timeout getting image\n";
