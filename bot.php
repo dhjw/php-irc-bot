@@ -7,7 +7,8 @@ error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING);
 if (empty($argv[1]) || !include("./settings-$argv[1].php")) exit("Usage: ./bot.php <instance> [test]\nnote: settings-<instance>.php must exist\n");
 $instance = $argv[1];
 
-if (!extension_loaded('sqlite3')) echo "The SQLite3 extension is required. On Ubuntu or debian, try sudo apt install php-sqlite3\n";
+// check some requirements
+foreach (['sqlite3', 'curl', 'mbstring'] as $re) if (!extension_loaded($re)) echo "The $re extension is required. On Ubuntu or Debian, try sudo apt install php-$re. The best PPA is from https://deb.sury.org\n";
 $db = init_db();
 upgrade(1);
 
