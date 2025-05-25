@@ -38,9 +38,9 @@ if (!empty($currencylayer_key)) $helptxt .= " !cc <amount> <from_currency> <to_c
 if (!empty($wolfram_appid)) $helptxt .= " !wa <query> - query Wolfram Alpha\n";
 $helptxt .= " !ud <term> [definition #] - query Urban Dictionary with optional definition number\n";
 if (!empty($gcloud_translate_keyfile)) $helptxt .= " !tr <text> or e.g. !tr en-fr <text> - translate text to english or between other languages. see https://bit.ly/iso639-1\n";
-$helptxt .= " !flip - flip a coin (call heads or tails first!)
- !rand <min> <max> [num] - get random numbers with optional number of numbers
- !8 or !8ball - magic 8-ball\n";
+$helptxt .= " !flip - flip a coin (call heads or tails first!) (uses random.org)
+ !rand <min> <max> [num] - get random numbers with optional number of numbers (uses random.org)
+ !8 or !8ball - magic 8-ball (modified to 50/50, uses random.org)\n";
 if (file_exists('/usr/games/fortune')) $helptxt .= " !f or !fortune - fortune\n";
 $helptxt .= " !insult [target] - deliver a Shakespearian insult to the channel with an optional target
 \nadmin commands:
@@ -62,30 +62,7 @@ $helptxt .= " !nick <nick> - Change the bot's nick
 
 note: commands may be used in channel or pm. separate multiple hostmasks with spaces. bans," . ($network == 'freenode' ? ' quiets,' : '') . " invites occur in $channel.";
 
-// update help paste only if changed
-list($help_url, $help_url_short, $help_text) = json_decode(get_data('help'), true);
-echo "Checking if help text changed.. ";
-if (!$help_text || $help_text <> $helptxt) echo "yes, creating new paste\n"; else {
-	$help_url = $help_url_short;
-	echo "no, help_url=$help_url\n";
-}
-
-if (!isset($help_url)) {
-	file_put_contents("./help-$nick.tmp", $helptxt);
-	$help_url = trim(shell_exec("pastebinit ./help-$nick.tmp"));
-	unlink("./help-$nick.tmp");
-	if (strpos($help_url, 'http') === false) {
-		echo "ERROR: Failed to paste help file! Is pastebinit installed? Help file disabled.\n";
-		$help_url = '';
-	}
-	echo "help url=$help_url\n";
-	if (!empty($help_url)) {
-		$orig_help_url = $help_url;
-		$help_url = make_short_url($help_url);
-		echo "short help url=$help_url\n";
-		set_data('help', json_encode([$orig_help_url, $help_url, $helptxt]));
-	}
-}
+$help_url = init_help(); // pastebin help if changed
 
 // init
 if (isset($connect_ip) && strpos($connect_ip, ':') !== false) $connect_ip = "[$connect_ip]"; // add brackets to ipv6
@@ -2998,6 +2975,61 @@ function get_ai_image_title($url, $image_data = null, $mime = null)
 		return false;
 	}
 	return rtrim($r->choices[0]->message->content, '.');
+}
+
+// paste help if changed, return help url. uses https://paste.debian.net/rpc-interface.html
+function init_help()
+{
+	global $nick, $helptxt;
+	list($help_url, $help_url_short, $delete_url, $help_text) = json_decode(get_data('help'), true);
+	echo "Checking if help text changed... ";
+	if (!$help_text || $help_text <> $helptxt) echo "yes, creating new paste\n"; else {
+		echo "no, URL: $help_url_short\n";
+		return $help_url_short;
+	}
+	if ($delete_url) @curlget([CURLOPT_URL => $delete_url]);
+	$name = substr(preg_replace('/[;,\'"<>]/', '-', $nick), 0, 10); # https://tinyurl.com/pchars
+	// create request without xmlrpc
+	$d = new DOMDocument('1.0', 'iso-8859-1');
+	$d->formatOutput = true;
+	$mc = $d->appendChild($d->createElement('methodCall'));
+	$mc->appendChild($d->createElement('methodName', 'paste.addPaste'));
+	$ps = $mc->appendChild($d->createElement('params'));
+	$pv = [$helptxt, $name, '-1', '', '1'];
+	foreach ($pv as $c) {
+		$p = $ps->appendChild($d->createElement('param'));
+		$value = $p->appendChild($d->createElement('value'));
+		$s = $value->appendChild($d->createElement('string'));
+		$s->nodeValue = $c;
+	}
+	$request = $d->saveXML();
+	// send request
+	$r = curlget([
+		CURLOPT_URL => 'https://paste.debian.net/server.pl',
+		CURLOPT_HTTPHEADER => ['Content-type: text/xml', 'Content-length: ' . strlen($request) . "\r\n", $request],
+		CURLOPT_CUSTOMREQUEST => 'POST'
+	]);
+	// parse result
+	$d = new DomDocument();
+	@$d->loadXML($r);
+	$xpath = new DOMXPath($d);
+	$view_url = @$xpath->query("//member[name='view_url']/value/string")->item(0)->nodeValue;
+	$statusmessage = @$xpath->query("//member[name='statusmessage']/value/string")->item(0)->nodeValue;
+	$delete_url = @$xpath->query("//member[name='delete_url']/value/string")->item(0)->nodeValue;
+	if (!$view_url && !$statusmessage) {
+		echo "Error pasting help file. Help disabled.\n";
+		return false;
+	}
+	if (isset($view_url) && preg_match('#^//paste\.debian\.net/hidden/[a-z0-9]+#', $view_url)) {
+		$help_url = 'https:' . str_replace('/hidden/', '/plainh/', $view_url);
+		$help_short_url = make_short_url($help_url);
+		set_data('help', json_encode([$help_url, $help_short_url, "https:$delete_url", $helptxt]));
+		echo "New help URL: $help_short_url\n";
+		return $help_short_url;
+	} else {
+		echo 'Error pasting help file: ' . ($statusmessage ? $statusmessage . ' ' : '') . "Help disabled.\n";
+		return false;
+	}
 }
 
 // create / open database storage
