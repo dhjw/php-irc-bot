@@ -130,7 +130,7 @@ $disable_help = false;
 $disable_triggers = false; // disable global triggers, not admin or custom triggers
 $disable_titles = false;
 $skip_dupe_output = false; // avoid repeating lines which can trigger some flood bots
-$title_cache_enabled = false; // shared between all bots. requires php-sqlite3 and uses /run/user tmpfs folder if possible
-$title_cache_size = 64;
+$title_cache_enabled = false; // shared between all bots running from same folder. recommended if cross-posting a lot
+$title_cache_size = 128;
 
 // see readme.md at https://github.com/dhjw/php-freenode-irc-bot for how to use custom triggers, loop processes and plugins

@@ -4,29 +4,27 @@
 chdir(dirname(__FILE__));
 set_time_limit(0);
 error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING);
-if (empty($argv[1])) exit("Usage: ./bot.php <instance> [test mode]\nnote: settings-<instance>.php must exist\n");
-if (!include("./settings-$argv[1].php")) exit("./settings-$argv[1].php not found. Create it.\n");
+if (empty($argv[1]) || !include("./settings-$argv[1].php")) exit("Usage: ./bot.php <instance> [test]\nnote: settings-<instance>.php must exist\n");
+$instance = $argv[1];
 
-if (empty($user_agent)) $user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
-$num_file_get_retries = 2;
+if (!extension_loaded('sqlite3')) echo "The SQLite3 extension is required. On Ubuntu or debian, try sudo apt install php-sqlite3\n";
+$db = init_db();
+upgrade(1);
 
 // test mode
-if (!empty($argv[2])) {
-	$datafile = __DIR__ . "/$argv[1].data.test.json";
+if (isset($argv[2]) && $argv[2] == "test") {
+	$instance .= "-test";
 	$channel = $test_channel;
 	$nick = $test_nick;
-} else $datafile = __DIR__ . "/$argv[1].data.json";
+}
 
-// load data
+// init
 $instance_hash = md5(file_get_contents(dirname(__FILE__) . '/bot.php'));
-$botdata = json_decode(file_get_contents($datafile));
-if (!is_object($botdata)) $botdata = new stdClass();
-
-if (isset($botdata->nick)) $nick = $botdata->nick;
 if (empty($network) || !in_array($network, ['freenode', 'rizon', 'gamesurge', 'libera', 'other'])) {
 	echo "Missing or invalid \$network setting. Using default Freenode.\n";
 	$network = 'freenode';
 }
+if (get_data('nick')) $nick = get_data('nick');
 
 $helptxt = "*** $nick $channel !help ***\n\nglobal commands:\n";
 if (isset($custom_triggers)) foreach ($custom_triggers as $v) if (isset($v[3])) $helptxt .= " $v[3]\n";
@@ -56,7 +54,6 @@ $helptxt .= " !b or !ban <nick or hostmask> [message] - ban by nick (*!*@mask) o
 if ($network == 'freenode' || $network == 'libera') $helptxt .= " !q or !quiet [mins] <nick or hostmask> - quiet by nick (*!*@mask) or hostmask for optional [mins] or default no expiry\n";
 if ($network == 'freenode') $helptxt .= " !rq or !removequiet [mins] <nick> [message] - remove user then quiet for optional [mins] with optional [message]\n";
 if ($network == 'freenode' || $network == 'libera') $helptxt .= " !uq or !unquiet <hostmasks> - unquiet by hostmask\n";
-if ($network == 'freenode') $helptxt .= " !fyc [mins] <nick or hostmask> - ban by hostmask with redirect to ##fix_your_connection for [mins] or default 60 mins\n";
 $helptxt .= " !nick <nick> - Change the bot's nick
  !invite <nick> - invite to channel
  !restart [message] - reload bot with optional quit message
@@ -66,34 +63,31 @@ $helptxt .= " !nick <nick> - Change the bot's nick
 note: commands may be used in channel or pm. separate multiple hostmasks with spaces. bans," . ($network == 'freenode' ? ' quiets,' : '') . " invites occur in $channel.";
 
 // update help paste only if changed
+list($help_url, $help_url_short, $help_text) = json_decode(get_data('help'), true);
 echo "Checking if help text changed.. ";
-if (!isset($botdata->help_text) || $botdata->help_text <> $helptxt) echo "yes, creating new paste\n"; else {
-	$help_url = $botdata->help_url_short;
+if (!$help_text || $help_text <> $helptxt) echo "yes, creating new paste\n"; else {
+	$help_url = $help_url_short;
 	echo "no, help_url=$help_url\n";
 }
 
 if (!isset($help_url)) {
-	file_put_contents("./help-$nick", $helptxt);
-	$help_url = trim(shell_exec("pastebinit ./help-$nick"));
-	unlink("./help-$nick");
+	file_put_contents("./help-$nick.tmp", $helptxt);
+	$help_url = trim(shell_exec("pastebinit ./help-$nick.tmp"));
+	unlink("./help-$nick.tmp");
 	if (strpos($help_url, 'http') === false) {
 		echo "ERROR: Failed to paste help file! Is pastebinit installed? Help file disabled.\n";
 		$help_url = '';
 	}
 	echo "help url=$help_url\n";
 	if (!empty($help_url)) {
-		$botdata->help_url = $help_url;
+		$orig_help_url = $help_url;
 		$help_url = make_short_url($help_url);
 		echo "short help url=$help_url\n";
-		$botdata->help_url_short = $help_url;
-		$botdata->help_text = $helptxt;
-		file_put_contents($datafile, json_encode($botdata));
+		set_data('help', json_encode([$orig_help_url, $help_url, $helptxt]));
 	}
 }
 
 // init
-if (function_exists('posix_getuid')) $run_dir = '/run/user/' . posix_getuid(); else $run_dir = '.';
-if (!file_exists($run_dir)) $run_dir = '.';
 if (isset($connect_ip) && strpos($connect_ip, ':') !== false) $connect_ip = "[$connect_ip]"; // add brackets to ipv6
 if (isset($curl_iface) && strpos($curl_iface, ':') !== false) $curl_iface = "[$curl_iface]";
 if (($user == 'your_username' || $pass == 'your_password' || empty($user) || empty($pass)) && (empty($disable_sasl) || empty($disable_nickserv))) {
@@ -107,6 +101,8 @@ if ($network == 'gamesurge' && empty($disable_sasl)) {
 }
 if (empty($ircname)) $ircname = $user;
 if (empty($ident)) $ident = 'bot';
+if (empty($user_agent)) $user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
+$num_file_get_retries = 2;
 if (empty($gcloud_translate_max_chars)) $gcloud_translate_max_chars = 50000;
 if (empty($ignore_urls)) $ignore_urls = [];
 $ignore_urls = array_merge($ignore_urls, ['google.com/search', 'google.com/images', 'scholar.google.com']);
@@ -126,11 +122,7 @@ $flood_lines = [];
 $base_msg_len = 60;
 if (!isset($custom_loop_functions)) $custom_loop_functions = [];
 $title_cache_enabled = !empty($title_cache_enabled);
-if ($title_cache_enabled) {
-	$title_cache_db = '';
-	if (empty($title_cache_size)) $title_cache_size = 64;
-	init_title_cache();
-}
+if ($title_cache_enabled && empty($title_cache_size)) $title_cache_size = 128;
 $title_bold = !empty($title_bold) ? "\x02" : '';
 if (!empty($twitter_nitter_enabled) && empty($twitter_nitter_instance)) $twitter_nitter_instance = 'https://nitter.net';
 if (!empty($nitter_links_via_twitter)) {
@@ -268,42 +260,21 @@ while (1) {
 		if ($time - $lasttime > 2 && $time - $connect_time > 10 && !$check_lock) {
 			$check_lock = true;
 			$lasttime = $time;
-			$botdata = json_decode(file_get_contents($datafile));
-			// unban expired fyc
-			if (!empty($botdata->fyc)) {
-				$botdata->fyc = (array)$botdata->fyc;
+			// unquiet expired q
+			if (get_data('timed_quiets')) {
+				$tqs = json_decode(get_data('timed_quiets'), true);
 				// check if timeout
 				$tounban = [];
-				foreach ($botdata->fyc as $k => $f) {
-					list($ftime, $fdur, $fhost) = explode('|', $f);
-					if (time() - $ftime >= $fdur) {
-						$tounban[] = $fhost;
-						unset($botdata->fyc[$k]);
-					}
-				}
-				if (!empty($tounban)) {
-					$botdata->fyc = array_values($botdata->fyc);
-					$opqueue[] = ['-b', $tounban];
-					file_put_contents($datafile, json_encode($botdata));
-					getops();
-				}
-			}
-			// unquiet expired q (TODO: merge with above fyc expiries)
-			if (!empty($botdata->tq)) {
-				$botdata->tq = (array)$botdata->tq;
-				// check if timeout
-				$tounban = [];
-				foreach ($botdata->tq as $k => $f) {
+				foreach ($tqs as $k => $f) {
 					list($ftime, $fdur, $fhost) = explode('|', $f);
 					if (time() - $ftime >= $fdur) {
 						if (strpos($fhost, '!') === false && strpos($fhost, '$a:') === false) $fhost .= '!*@*';
 						$tounban[] = $fhost;
-						unset($botdata->tq[$k]);
+						unset($tqs[$k]);
 					}
 				}
 				if (!empty($tounban)) {
-					$botdata->tq = array_values($botdata->tq);
-					file_put_contents($datafile, json_encode($botdata));
+					set_data('timed_quiets', json_encode($tqs));
 					if ($network == 'freenode') {
 						foreach ($tounban as $who) send("PRIVMSG chanserv :UNQUIET $channel $who\n");
 					} elseif ($network == 'libera' || $network == 'other') {
@@ -346,9 +317,7 @@ while (1) {
 				echo "Changed bot nick to $newnick\n";
 				$nick = $newnick;
 				$orignick = $nick;
-				$botdata = json_decode(file_get_contents($datafile));
-				$botdata->nick = $nick;
-				file_put_contents($datafile, json_encode($botdata));
+				set_data('nick', $nick);
 				if (($network == 'freenode' || $network == 'libera') && (empty($disable_nickserv) || empty($disable_sasl))) send("PRIVMSG NickServ GROUP\n"); elseif ($network == 'rizon' && (empty($disable_nickserv) || empty($disable_sasl))) send("PRIVMSG NickServ GROUP $user $pass\n");
 				$base_msg_len = strlen(":$nick!~$ident@$botmask PRIVMSG  :\r\n");
 			} else {
@@ -559,30 +528,6 @@ while (1) {
 					getops();
 					continue;
 				}
-			} elseif ($trigger == '!fyc' && $network == 'freenode') {
-				// check if mins provided
-				$arr = explode(' ', $args);
-				if (is_numeric($arr[0])) {
-					if (!isset($arr[1])) continue; // ensure theres more than just mins
-					$fyctime = $arr[0];
-					unset($arr[0]);
-					$arr = array_values($arr);
-				} else $fyctime = 60;
-				list($mask) = $arr;
-				// if contains $ or @, ban by mask, else build mask from nick
-				if (strpos($mask, '@') === false && strpos($mask, '$') === false) {
-					$id = search_multi($users, 'nick', $mask);
-					if (!$id) {
-						if ($ex[2] == $nick) $tmp = $incnick; else $tmp = $channel; // allow PM response
-						send("PRIVMSG $tmp :Nick not found in channel.\n");
-						continue;
-					}
-					$mask = "*!*@" . $users[$id]['host'];
-				}
-				echo "FixYourConnection $mask, fyctime=$fyctime\n";
-				$opqueue[] = ['fyc', [$mask, $fyctime]];
-				getops();
-				continue;
 			} elseif ($trigger == '!t' || $trigger == '!topic') {
 				if (in_array($network, ['freenode', 'gamesurge', 'rizon', 'libera'])) send("PRIVMSG ChanServ :TOPIC $channel $args\n"); else {
 					$opqueue[] = ['topic', null, ['msg' => $args]];
@@ -2208,7 +2153,7 @@ function curlget($opts = [], $more_opts = [])
 
 	if ($curl_impersonate_enabled && empty($more_opts['no_curl_impersonate'])) {
 		// commandline impersonate
-		$cmd = "$curl_impersonate_binary -Ls -w '%{stderr}%{json}' --retry 1 --max-redirs 7 -b cookiefile.txt -c cookiefile.txt --ipv4";
+		$cmd = "$curl_impersonate_binary -Ls -w '%{stderr}%{json}' --retry 1 --max-redirs 7 -b cookies.txt -c cookies.txt --ipv4";
 		$cmd .= ' --connect-timeout ' . (!empty($opts[CURLOPT_CONNECTTIMEOUT]) ? $opts[CURLOPT_CONNECTTIMEOUT] : 15);
 		$cmd .= ' --max-time ' . (!empty($opts[CURLOPT_TIMEOUT]) ? $opts[CURLOPT_TIMEOUT] : 15);
 		if (!empty($set_iface)) $cmd .= " --interface $set_iface";
@@ -2258,7 +2203,7 @@ function curlget($opts = [], $more_opts = [])
 		curl_setopt($ch, CURLOPT_TIMEOUT, 15);
 		if (!empty($set_iface)) curl_setopt($ch, CURLOPT_INTERFACE, $set_iface);
 		curl_setopt($ch, CURLOPT_USERAGENT, $user_agent);
-		curl_setopt($ch, CURLOPT_COOKIEFILE, 'cookiefile.txt');
+		curl_setopt($ch, CURLOPT_COOKIEFILE, 'cookies.txt');
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 		// curl_setopt($ch,CURLOPT_VERBOSE,1);
@@ -2374,25 +2319,6 @@ function doopdop()
 				$mode = '-' . str_repeat('b', count($who));
 				send("MODE $channel $mode " . implode(' ', $who) . "\n");
 			}
-		} elseif ($what == 'fyc') {
-			list($tmpmask, $tmptime) = $who;
-			$fyctime = $tmptime * 60;
-			$tmpmask .= '$##fix_your_connection';
-			if ($fyctime > 0) { // 0 = no time limit
-				$botdata = json_decode(file_get_contents($datafile));
-				if (!isset($botdata->fyc)) $botdata->fyc = []; else $botdata->fyc = (array)$botdata->fyc;
-				foreach ($botdata->fyc as $fyc) {
-					$fyc = explode('|', $fyc);
-					echo "fyc[2]=$fyc[2] tmpmask=$tmpmask";
-					if ($fyc[2] == $tmpmask) {
-						echo "dupe\n";
-						continue(2);
-					}
-				}
-				$botdata->fyc[] = time() . "|$fyctime|" . $tmpmask;
-				file_put_contents($datafile, json_encode($botdata));
-			}
-			if (empty($always_opped)) send("MODE $channel +b-o $tmpmask $nick\n"); else send("MODE $channel +b $tmpmask\n");
 		}
 	}
 	$opped = false;
@@ -2531,29 +2457,27 @@ function get_base_domain($d)
 	global $public_suffixes;
 	$d = strtolower($d);
 	if (empty($public_suffixes)) {
-		// todo: refresh like once a month on bot start, if exists; until then delete public_suffix_list.dat and restart bot
-		if (!file_exists('public_suffix_list.dat')) {
-			echo "Updating public_suffix_list.dat\n";
+		// todo: refresh like once a month on bot start; for now, delete entry manually from data.db
+		if (!get_data('public_suffix_list', '*')) {
+			echo "Updating public suffix list\n";
 			$f = file_get_contents('https://publicsuffix.org/list/public_suffix_list.dat');
 			if (!empty($f)) {
-				file_put_contents('public_suffix_list.dat', $f) or die('Error writing file, check permissions.');
-				$fp = fopen('public_suffix_list.dat', 'r');
+				$lines = explode("\n", $f);
 				$f = "// Source: https://publicsuffix.org/list/ (modified) License: https://mozilla.org/MPL/2.0/\n";
-				while (!feof($fp)) {
-					$l = fgets($fp, 1024);
+				foreach ($lines as $l) {
 					if (substr($l, 0, 2) == '//' || $l == "\n") continue; elseif (substr($l, 0, 2) == '*.') $l = substr($l, 2);
 					elseif (substr($l, 0, 1) == '!') $l = substr($l, 1);
-					$f .= $l;
+					$f .= "$l\n";
 				}
-				fclose($fp);
-				file_put_contents('public_suffix_list.dat', $f);
+				unset($lines);
+				set_data('public_suffix_list', json_encode([time(), $f]), '*');
 				unset($f);
 			} else {
 				echo "Error downloading public_suffix_list.dat\n";
 				return $d;
 			}
 		}
-		$public_suffixes = explode("\n", file_get_contents('public_suffix_list.dat')); // store in memory (fastest)
+		$public_suffixes = explode("\n", json_decode(get_data('public_suffix_list', '*'), true)[1]); // store in memory (fastest)
 	}
 	$l = substr($d, 0, strpos($d, '.')); // save last stripped sub/dom
 	$c = substr($d, strpos($d, '.') + 1); // strip first sub/dom to save an iteration
@@ -2729,19 +2653,17 @@ function timedquiet($secs, $mask)
 		getops();
 	}
 	if (is_numeric($secs) && $secs > 0) {
-		$botdata = json_decode(file_get_contents($datafile));
-		if (!isset($botdata->tq)) $botdata->tq = []; else $botdata->tq = (array)$botdata->tq;
-		foreach ($botdata->tq as $k => $tq) {
+		$tqs = @json_decode(get_data('timed_quiets'), true) ?: [];
+		foreach ($tqs as $k => $tq) {
 			$tq = explode('|', $tq);
 			echo "tq[2]=$tq[2] mask=$mask";
 			if ($tq[2] == $mask) {
 				echo "removing dupe\n";
-				unset($botdata->tq[$k]);
-				$botdata->tq = array_values($botdata->tq);
+				unset($tqs[$k]);
 			}
 		}
-		$botdata->tq[] = time() . "|$secs|$mask";
-		file_put_contents($datafile, json_encode($botdata));
+		$tqs[] = time() . "|$secs|$mask";
+		set_data('timed_quiets', json_encode($tqs));
 	}
 }
 
@@ -2853,13 +2775,12 @@ function get_true_random($min = 1, $max = 100, $num = 1)
 // Google translate, requires gcloud commandline tool installed and $gcloud_translate_keyfile set
 function google_translate($opts = ['text' => '', 'from_lang' => '', 'to_lang' => ''])
 {
-	global $datafile, $botdata, $gcloud_translate_keyfile, $gcloud_translate_max_chars;
-	// check limit
-	$ym = date("Y-m");
-	if (!isset($botdata->translate_char_cnt)) $botdata->translate_char_cnt = new stdClass();
-	if (!isset($botdata->translate_char_cnt->{$ym})) $botdata->translate_char_cnt->{$ym} = 0;
-	echo "Translating (" . $botdata->translate_char_cnt->{$ym} . "/$gcloud_translate_max_chars" . ")...\n";
-	if ($botdata->translate_char_cnt->{$ym} + strlen($opts['text']) > $gcloud_translate_max_chars) {
+	global $datafile, $gcloud_translate_keyfile, $gcloud_translate_max_chars;
+	// check limit, only store current year-month
+	list($ym, $cnt) = json_decode(get_data('google_translate_count'), true) ?: [date("Y-m"), 0];
+	if ($ym <> date("Y-m")) list($ym, $cnt) = [date("Y-m"), 0];
+	echo "Translating ($cnt/$gcloud_translate_max_chars" . ")...\n";
+	if ($cnt + strlen($opts['text']) > $gcloud_translate_max_chars) {
 		$ret = new stdClass();
 		$ret->error = 'Monthly translate limit exceeded';
 		return $ret;
@@ -2871,8 +2792,8 @@ function google_translate($opts = ['text' => '', 'from_lang' => '', 'to_lang' =>
 	$orig_r = curlget([CURLOPT_URL => 'https://translation.googleapis.com/language/translate/v2', CURLOPT_CUSTOMREQUEST => 'POST', CURLOPT_POSTFIELDS => $body, CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $token]]);
 	$r = json_decode($orig_r);
 	if (isset($r->data->translations[0])) {
-		$botdata->translate_char_cnt->{$ym} += strlen($opts['text']);
-		file_put_contents($datafile, json_encode($botdata));
+		$cnt += strlen($opts['text']);
+		set_data('google_translate_count', json_encode([$ym, $cnt]));
 		$ret = new stdClass();
 		$ret->text = html_entity_decode($r->data->translations[0]->translatedText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 		$ret->from_lang = isset($r->data->translations[0]->detectedSourceLanguage) ? $r->data->translations[0]->detectedSourceLanguage : $opts['from_lang'];
@@ -2942,30 +2863,20 @@ function register_loop_function($f)
 	} else echo "Skipping duplicate custom loop function \"$f\"\n";
 }
 
-function init_title_cache()
-{
-	global $title_cache_db, $run_dir;
-	/** @noinspection PhpParamsInspection */
-	$title_cache_db = new SQLite3("$run_dir/title_cache.db");
-	$title_cache_db->busyTimeout(10000);
-	$r = $title_cache_db->querySingle("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='titles';");
-	if ($r == 0) $title_cache_db->query("CREATE TABLE titles (url text NOT NULL,title text NOT NULL); CREATE INDEX url on titles(url)");
-}
-
 function add_to_title_cache($u, $t)
 {
-	global $title_cache_db, $title_cache_size;
-	$s = $title_cache_db->prepare('INSERT INTO titles VALUES(:url,:title)');
+	global $db, $title_cache_size;
+	$s = $db->prepare('INSERT OR REPLACE INTO title_cache (url, title) VALUES (:url, :title)');
 	$s->bindValue(':url', $u);
 	$s->bindValue(':title', $t);
 	$s->execute();
-	$title_cache_db->query("DELETE FROM titles WHERE ROWID IN (SELECT ROWID FROM titles ORDER BY ROWID DESC LIMIT -1 OFFSET $title_cache_size)");
+	$db->query("DELETE FROM title_cache WHERE ROWID IN (SELECT ROWID FROM title_cache ORDER BY ROWID DESC LIMIT -1 OFFSET $title_cache_size)");
 }
 
 function get_from_title_cache($u)
 {
-	global $title_cache_db;
-	$s = $title_cache_db->prepare('SELECT title FROM titles WHERE url = :url LIMIT 1;');
+	global $db;
+	$s = $db->prepare('SELECT title FROM title_cache WHERE url = :url LIMIT 1;');
 	$s->bindValue(':url', $u);
 	$r = $s->execute();
 	$r = $r->fetchArray(SQLITE3_NUM);
@@ -2976,12 +2887,9 @@ function nitter_hosts_update()
 {
 	global $nitter_hosts, $nitter_hosts_time, $run_dir;
 	$time = time();
-	if (file_exists("$run_dir/nitter-hosts.dat")) list($ctime, $chosts) = explode('||', file_get_contents("$run_dir/nitter-hosts.dat")); else {
-		$ctime = 0;
-		$chosts = "";
-	} // shared cache
+	list($ctime, $chosts) = json_decode(get_data('nitter_hosts', '*'), true) ?: [0, '']; // shared cache
 	if ($time - $ctime >= 43200) {
-		file_put_contents("$run_dir/nitter-hosts.dat", "$time||$nitter_hosts"); // pseudo-lock. note on boot should sleep a few secs after loading first bot to build file
+		set_data('nitter_hosts', json_encode([$time, $nitter_hosts]), '*'); // pseudo-lock. note on boot should sleep a few secs after loading first bot to update
 		echo "Updating list of nitter hosts (for link titles)... ";
 		$html = curlget([CURLOPT_URL => 'https://status.d420.de/api/v1/instances']);
 		$json = @json_decode($html);
@@ -2994,11 +2902,11 @@ function nitter_hosts_update()
 			}
 			echo "Success:\n" . join(', ', $hosts) . "\n";
 			$nitter_hosts = '(?:' . str_replace('\|', '|', preg_quote(implode('|', $hosts))) . ')'; # for direct insertion into preg_replace
-			file_put_contents("$run_dir/nitter-hosts.dat", "$time||$nitter_hosts");
+			set_data('nitter_hosts', json_encode([$time, $nitter_hosts]), '*');
 			$nitter_hosts_time = $time;
 		} else {
 			echo "Failed to get instance info. Will retry in 15 mins.\n";
-			file_put_contents("$run_dir/nitter-hosts.dat", ($time - 42300) . "||$nitter_hosts");
+			set_data('nitter_hosts', json_encode([$time - 42300, $nitter_hosts]), '*');
 			$nitter_hosts_time += 900;
 		}
 	} else {
@@ -3090,4 +2998,83 @@ function get_ai_image_title($url, $image_data = null, $mime = null)
 		return false;
 	}
 	return rtrim($r->choices[0]->message->content, '.');
+}
+
+// create / open database storage
+function init_db()
+{
+	global $db, $title_cache_enabled;
+	echo "Initializing database... ";
+	/** @noinspection PhpParamsInspection */
+	$db = new SQLite3("./data.db");
+	$db->busyTimeout(30000);
+	$db->enableExceptions(true);
+	$db->exec('VACUUM;');
+
+	$r = $db->querySingle("SELECT name FROM sqlite_master WHERE type='table' AND name='bot_data';");
+	if ($r == 0) {
+		$db->query("CREATE TABLE bot_data (instance TEXT NOT NULL, var TEXT NOT NULL, val TEXT); CREATE UNIQUE INDEX iv ON bot_data(instance, var)");
+		echo "Created table bot_data. ";
+	}
+
+	if ($title_cache_enabled) {
+		$r = $db->querySingle("SELECT name FROM sqlite_master WHERE type='table' AND name='title_cache';");
+		if ($r == 0) {
+			$db->query("CREATE TABLE title_cache (url text NOT NULL, title text NOT NULL); CREATE UNIQUE INDEX url on title_cache(url)");
+			echo "Created table title_cache. ";
+		}
+	}
+	echo "OK\n";
+	return $db;
+
+}
+
+function set_data($var, $val, $instance = null)
+{
+	global $db;
+	if (!$instance) global $instance;
+	$s = $db->prepare('INSERT OR REPLACE INTO bot_data (instance, var, val) VALUES (:instance, :var, :val)');
+	$s->bindValue(':instance', $instance);
+	$s->bindValue(':var', $var);
+	$s->bindValue(':val', $val);
+	$s->execute();
+}
+
+function get_data($var, $instance = null)
+{
+	global $db;
+	if (!$instance) global $instance;
+	$s = $db->prepare('SELECT val FROM bot_data WHERE instance = :instance AND var = :var LIMIT 1;');
+	$s->bindValue(':instance', $instance);
+	$s->bindValue(':var', $var);
+	$r = $s->execute();
+	$r = $r->fetchArray(SQLITE3_NUM);
+	return $r ? $r[0] : false;
+}
+
+// run-once upgrades
+function upgrade($upgrade_version)
+{
+	// check db version
+	$cur_version = get_data('upgrade_version', '*') ?: 0;
+	if ($cur_version < 1) {
+		// move data to new data.db sqlite3 database
+		if (function_exists('posix_getuid')) $run_dir = '/run/user/' . posix_getuid(); else $run_dir = '.';
+		@unlink("$run_dir/nitter-hosts.dat"); // rebuild nitter_hosts.dat in new db
+		@unlink('nitter-hosts.dat');
+		@unlink('public_suffix_list.dat'); // rebuild public_suffix_list in new db
+		@unlink("$run_dir/title_cache.db"); // rebuild title cache in new db
+		@unlink("title_cache.db");
+		foreach (scandir('.') as $f) { // put data from json data files into new db
+			if ($f == '.' || $f == '..' || !preg_match("/\.data(?:\.test)?\.json$/", $f)) continue;
+			$in = preg_replace('/\.data\.test\.json$/', '-test', $f);
+			$in = preg_replace('/\.data\.json$/', '', $in);
+			$js = json_decode(file_get_contents($f));
+			if (isset($js->nick)) set_data('nick', $js->nick, $in);
+			set_data('help', json_encode([$js->help_url ?: '', $js->help_url_short ?: '', $js->help_text ?: '']), $in);
+			unlink($f);
+		}
+		@rename('cookiefile.txt', 'cookies.txt');
+		set_data('upgrade_version', 1, '*');
+	}
 }
