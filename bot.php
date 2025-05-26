@@ -1378,9 +1378,10 @@ while (1) {
 									if (substr($m2[1], 0, 1) == '/') $m2[1] = "https://x.com$m2[1]";
 									// shorten displayed link if possible, add hint if needed
 									$fu = get_final_url($m2[1], ['no_body' => 1]);
-									// if link same as quote-link and at end of tweet, remove it
-									if ($fu == $qh) {
-										$b = rtrim(preg_replace("#$m2[0]$#", '', $b));
+									// if link same as quote-link and at beginning or end of tweet, remove it
+									$tmp = '/^' . preg_quote($m2[0], '/') . '|' . preg_quote($m2[0], '/') . '$/';
+									if ($fu == $qh && preg_match($tmp, $b)) {
+										$b = trim(preg_replace($tmp, '', $b));
 										continue;
 									}
 									$s = make_short_url($fu);
