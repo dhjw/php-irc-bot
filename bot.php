@@ -2014,7 +2014,8 @@ while (1) {
 					// strip numeric entities that don't seem to display right on IRC when converted
 					$title = preg_replace('/(&#[0-9]+;)/', '', $title);
 					$title = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $title);
-					$title = trim(preg_replace('/\s+/', ' ', $title));
+					$title = preg_replace('/\s+/', ' ', $title);
+					$title = trim($title, " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"); // unicode spaces, ltr, rtl
 					$notitletitles = [$parse_url["host"], 'imgur: the simple image sharer', 'Imgur', 'Imgur: The most awesome images on the Internet', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*'];
 					foreach ($notitletitles as $ntt) {
 						if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
