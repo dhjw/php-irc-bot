@@ -133,4 +133,4 @@ $skip_dupe_output = false; // avoid repeating lines which can trigger some flood
 $title_cache_enabled = false; // shared between all bots running from same folder. recommended if cross-posting a lot
 $title_cache_size = 128;
 
-// see readme.md at https://github.com/dhjw/php-freenode-irc-bot for how to use custom triggers, loop processes and plugins
+// see readme.md at https://github.com/dhjw/php-irc-bot for how to use custom triggers, loop processes and plugins
