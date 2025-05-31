@@ -18,32 +18,36 @@ $llm_config = [
 			"key" => "", // https://console.x.ai/
 			"model" => "grok-3-mini", // https://docs.x.ai/docs/models
 			"vision_model" => "grok-2-vision-latest",
+			"search_enabled" => false, // may not work with mini model. see https://docs.x.ai/docs/guides/live-search
+			"search_max_results" => 15, // 1-30
+			"search_mode" => "auto", // off, auto, on
+			"search_sources" => ["web", "x"], // web, x, news
+			"search_safe" => false, // only safe results
 		],
 		[
 			"name" => "Gemini", // note: "Gemini" (case-sensitive) set here is used to determine whether to only send data uris, and not urls, to the vision model
 			"trigger" => "!gem",
 			"base_url" => "https://generativelanguage.googleapis.com/v1beta/openai",
 			"key" => "", // https://aistudio.google.com/apikey
-			"model" => "gemini-2.5-flash-preview-04-17", // https://ai.google.dev/gemini-api/docs/models
-			"vision_model" => "gemini-2.5-flash-preview-04-17",
+			"model" => "gemini-2.5-flash-preview-05-20", // https://ai.google.dev/gemini-api/docs/models
+			"vision_model" => "gemini-2.5-flash-preview-05-20",
 		],
 	],
-	"github_enabled" => true, // upload responses beyond X lines to github and output the link instead, e.g. https://user.github.io/repo/?id
+	"github_enabled" => true, // upload responses beyond X lines to github and output the link instead, e.g. https://user.github.io/?id
 	// how to setup github:
-	// create a user and a repo, preferably with a short name like "r"
+	// create a user and a repo with the name user.github.io (use your username)
 	// in user Settings > Developer settings > Personal Access Tokens, create a non-expiring classic token with repo access
 	// create a branch named "main" and a branch named "page". make sure main is set as default. this can be done by running commands in an empty local project folder:
-	//   git init; git remote add origin https://user:token@github.com/user/repo.git  # edit to contain your user, token and repo
+	//   git init; git remote add origin https://user:token@github.com/user.github.io/repo.git  # edit to contain your user and token
 	//   git config user.name = user; git config user.email = user@example.com  # edit to contain your github name and email
 	//   git checkout --orphan main; git commit -m "Initial commit" --allow-empty; git push --set-upstream origin main  # create empty main branch
-	//   git checkout -b page; git clone -b page https://github.com/llm10/r.git page  # full example page with images for chatgpt, grok and gemini
+	//   git checkout -b page; git clone -b page https://github.com/llm10/llm10.github.io.git page  # full example page with markdown formatting, code highlighting, images for chatgpt, grok and gemini
 	//   rm -rf ./page/.git; mv ./page/* .; rmdir ./page  # move example files to local working page branch folder
 	//   git add .; git commit -m "Initial commit"; git push --set-upstream origin page  # push page branch and files
 	// in repo Settings, enable Pages and set the root to branch "page"
 	// note: a /results folder will be automatically created in the default/main branch containing a base36 hierarchy of base64-encoded results
 	"github_token" => "",
 	"github_user" => "llm10",
-	"github_repo" => "r",
 	"github_committer_name" => "llmbot", // doesn't have to be a real user
 	"github_committer_email" => "llmbot@example.com", // doesn't have to be a real email
 	"github_min_lines" => 11, // set to 1 to upload all results and only output links to irc
@@ -59,7 +63,8 @@ $llm_config = [
 ];
 // note: $llm_config vars can be modified after plugin inclusion in bot settings file without changing this file
 
-foreach ($llm_config["services"] as $s) $custom_triggers[] = [$s["trigger"], "function:llm_query", true, $s["trigger"] . " - query " . $s["name"] . " AI"];
+foreach ($llm_config["services"] as $s) $custom_triggers[] = [$s["trigger"], "function:llm_query", true, $s["trigger"] . " - query " . $s["name"]];
+if ($llm_config["github_enabled"]) $llm_config["user_repo"] = $llm_config["github_user"] . '/' . $llm_config["github_user"] . '.github.io';
 
 function llm_query()
 {
@@ -202,7 +207,19 @@ function llm_query()
 	else $data->model = $service["model"];
 	$data->stream = false;
 	$data->temperature = 0;
-	$data->user = hash("sha256", $incnick);
+	if (!empty($service["search_enabled"])) { // grok live search
+		$s = new stdClass();
+		$s->max_search_results = $service["search_max_results"];
+		$s->mode = $service["search_mode"];
+		foreach ($service["search_sources"] as $src) {
+			$t = new stdClass();
+			$t->type = $src;
+			$t->safe_search = $service["search_safe"];
+			$s->sources[] = $t;
+		}
+		$data->search_parameters = $s;
+	}
+	$data->user = hash("sha256", $channel . $incnick);
 
 	echo "[llm-request] url: " . $service["base_url"] . "/chat/completions, data: " . json_encode($data) . "\n";
 	$r = curlget([
@@ -221,7 +238,7 @@ function llm_query()
 	echo "[llm-response] " . json_encode($r) . "\n";
 	if (!empty($r->error)) return send("PRIVMSG $target :$r->error\n");
 	if (!isset($r->choices[0]->message->content)) {
-		if (isset($r[0]->error->message)) return send("PRIVMSG $target :" . $service["name"] . " API error: {$r[0]->error->message}\n");
+		if (is_array($r) && isset($r[0]->error->message)) return send("PRIVMSG $target :" . $service["name"] . " API error: {$r[0]->error->message}\n");
 		return send("PRIVMSG $target :" . $service["name"] . " API error\n");
 	}
 	$content = $r->choices[0]->message->content;
@@ -264,7 +281,7 @@ function llm_query()
 	if (($llm_config["github_enabled"] && count($out_lines) >= $llm_config["github_min_lines"]) || $github_force) {
 		// read index variable
 		$r = curlget([
-			CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["github_user"] . "/" . $llm_config["github_repo"] . "/actions/variables/bot_index",
+			CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/actions/variables/bot_index",
 			CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
 		], ["no_curl_impersonate" => 1]);
 		// echo "[DEV] github get index r: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
@@ -279,7 +296,7 @@ function llm_query()
 			$data->name = "bot_index";
 			$data->value = "1"; // start at 1 to avoid 0/0 results folder with single entry
 			$r = curlget([
-				CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["github_user"] . "/" . $llm_config["github_repo"] . "/actions/variables",
+				CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/actions/variables",
 				CURLOPT_CUSTOMREQUEST => "POST",
 				CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
 				CURLOPT_POSTFIELDS => json_encode($data)
@@ -291,12 +308,27 @@ function llm_query()
 			$github_index = 1;
 		} else $github_index = $r->value;
 
-		// craft results, incl memory
+		// update bot_index variable early, to help prevent collisions with other instances and corruption if other calls fail
+		// echo "[llm] Updating bot_index repo variable on GitHub\n";
+		$data = new stdClass();
+		$data->name = "bot_index";
+		$data->value = (string)($github_index + 1);
+		$r = curlget([
+			CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/actions/variables/bot_index",
+			CURLOPT_CUSTOMREQUEST => "PATCH",
+			CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
+			CURLOPT_POSTFIELDS => json_encode($data)
+		], ["no_curl_impersonate" => 1]);
+		// echo "[DEV] github update index r: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
+		$r = @json_decode($r);
+		if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) return send("PRIVMSG $target :GitHub timeout\n");
+		if ($curl_info["RESPONSE_CODE"] !== 204) return send("PRIVMSG $target :GitHub error updating index var\n");
+
+		// prepare file for upload
 		if ($llm_config["memory_enabled"]) {
 			$results = [];
 			foreach ($llm_config["memory_items"][$service["name"]] as $mi) $results[] = [$mi->role == "user" ? "u" : "a", $mi->content[0]->type == "text" ? "t" : "?", $mi->content[0]->text];
 		} else $results = [["u", "t", $args], ["a", "t", $content]];
-
 		$file_data = new stdClass();
 		$file_data->s = $service["name"];
 		$file_data->r = $results;
@@ -313,7 +345,7 @@ function llm_query()
 		$base36_id = base_convert($github_index, 10, 36);
 		$github_path = "results/" . substr($base36_id, 0, 1) . "/" . (strlen($base36_id) > 1 ? substr($base36_id, 1, 1) : "0") . "/" . $base36_id;
 		$r = curlget([
-			CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["github_user"] . "/" . $llm_config["github_repo"] . "/contents/$github_path",
+			CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/contents/$github_path",
 			CURLOPT_CUSTOMREQUEST => "PUT",
 			CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
 			CURLOPT_POSTFIELDS => json_encode($data)
@@ -323,22 +355,7 @@ function llm_query()
 		if ($curl_info["RESPONSE_CODE"] !== 201) return send("PRIVMSG $target :GitHub error\n");
 
 		$tmp = explode("/", $r->content->download_url);
-		$url = "https://" . $llm_config["github_user"] . ".github.io/" . $llm_config["github_repo"] . "/?" . $tmp[count($tmp) - 1];
-
-		// echo "[llm] Updating bot_index repo variable on GitHub\n";
-		$data = new stdClass();
-		$data->name = "bot_index";
-		$data->value = (string)($github_index + 1);
-		$r = curlget([
-			CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["github_user"] . "/" . $llm_config["github_repo"] . "/actions/variables/bot_index",
-			CURLOPT_CUSTOMREQUEST => "PATCH",
-			CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
-			CURLOPT_POSTFIELDS => json_encode($data)
-		], ["no_curl_impersonate" => 1]);
-		// echo "[DEV] github update index r: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
-		$r = @json_decode($r);
-		if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) return send("PRIVMSG $target :GitHub timeout\n");
-		if ($curl_info["RESPONSE_CODE"] !== 204) return send("PRIVMSG $target :GitHub error updating index var\n");
+		$url = "https://" . $llm_config["github_user"] . ".github.io/?" . $tmp[count($tmp) - 1];
 
 		return send("PRIVMSG $target :" . ($llm_config["github_nick_before_link"] && substr($target, 0, 1) == "#" ? "$incnick: " : "") . "$url\n");
 	}
@@ -385,13 +402,21 @@ if ($llm_config["github_link_titles"]) {
 	register_loop_function("llm_link_titles");
 	function llm_link_titles()
 	{
-		global $llm_config, $target, $channel, $msg, $title_bold, $title_cache_enabled;
-		if ($target <> $channel) return;
-		preg_match_all("#(https://" . $llm_config["github_user"] . ".github.io/" . $llm_config["github_repo"] . "/\?[a-z0-9]+?)(?:\W|$)#", $msg, $m);
+		global $llm_config, $privto, $channel, $msg, $title_bold, $title_cache_enabled;
+		if ($privto <> $channel) return;
+		preg_match_all("#(https://" . $llm_config["github_user"] . ".github.io/\?[a-z0-9]+?)(?:\W|$)#", $msg, $m);
 		if (!empty($m[0])) foreach (array_unique($m[1]) as $u) {
-			$msg = trim(str_replace($u, "", $msg)); // strip url so doesn't get processed again after this
+			$msg = trim(str_replace($u, "", $msg)); // strip url so doesn't get processed again after this in bot.php
+			if ($title_cache_enabled) {
+				$r = get_from_title_cache($u);
+				if ($r) {
+					echo "Using title from cache\n";
+					send("PRIVMSG $channel :$title_bold$r$title_bold\n");
+					continue;
+				}
+			}
 			$id = substr($u, strrpos($u, "?") + 1);
-			$r = curlget([CURLOPT_URL => "https://raw.githubusercontent.com/" . $llm_config["github_user"] . "/" . $llm_config["github_repo"] . "/HEAD/results/" . $id[0] . "/" . (strlen($id) > 1 ? $id[1] : "0") . "/" . $id]); // same as view page js
+			$r = curlget([CURLOPT_URL => "https://raw.githubusercontent.com/" . $llm_config["user_repo"] . "/HEAD/results/" . $id[0] . "/" . (strlen($id) > 1 ? $id[1] : "0") . "/" . $id]); // same as view page js
 			$r = @json_decode(@base64_decode($r));
 			if (!$r) {
 				echo "[llm_link_titles] Error parsing GitHub response for $u\n";
