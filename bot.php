@@ -230,9 +230,6 @@ while (1) {
 		}
 		// echo "msg=\"$msg\"\ntrigger=\"$trigger\"\nargs=\"$args\"\n";
 
-		// custom loop functions
-		foreach ($custom_loop_functions as $f) if ($f() == 2) continue(2);
-
 		// ongoing checks
 		if ($time - $lasttime > 2 && $time - $connect_time > 10 && !$check_lock) {
 			$check_lock = true;
@@ -270,6 +267,9 @@ while (1) {
 				continue(2);
 			}
 		}
+
+		// custom loop functions
+		foreach ($custom_loop_functions as $f) if ($f() == 2) continue(2);
 
 		// get botmask from WHOIS on connect
 		if ($ex[1] == '311') {
