@@ -3001,6 +3001,10 @@ function init_help()
 		CURLOPT_HTTPHEADER => ['Content-type: text/xml', 'Content-length: ' . strlen($request) . "\r\n", $request],
 		CURLOPT_CUSTOMREQUEST => 'POST'
 	]);
+	if (empty($r)) { // fatal for loadXML
+		echo "Error pasting help file. Response blank. Help disabled.\n";
+		return false;
+	}
 	// parse result
 	$d = new DomDocument();
 	@$d->loadXML($r);
