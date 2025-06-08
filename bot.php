@@ -2938,7 +2938,7 @@ function get_ai_image_title($url, $image_data = null, $mime = null)
 	$msg_obj->role = "user";
 	$c = new stdClass();
 	$c->type = "text";
-	$c->text = !empty($ai_image_titles_prompt) ? $ai_image_titles_prompt : 'very short summary on one line. dont describe the format e.g. "the image" or "the chart", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial" or "offensive". keep it short!';
+	$c->text = !empty($ai_image_titles_prompt) ? $ai_image_titles_prompt : 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
 	$msg_obj->content[] = $c;
 	$msg_obj->content[] = $img_obj;
 	$data->messages[] = $msg_obj;
