@@ -17,21 +17,21 @@ $llm_config = [
 			"base_url" => "https://api.x.ai/v1",
 			"key" => "", // https://console.x.ai/
 			"model" => "grok-3-mini", // https://docs.x.ai/docs/models
-			"vision_model" => "grok-2-vision-latest",
+			"vision_model" => "grok-2-vision",
 			"search_enabled" => false, // may not work with mini model. see https://docs.x.ai/docs/guides/live-search
 			"search_max_results" => 15, // 1-30
 			"search_mode" => "auto", // off, auto, on
 			"search_sources" => ["web", "x"], // web, x, news
 			"search_safe" => false, // only safe results
 		],
-		[
-			"name" => "Gemini", // note: "Gemini" (case-sensitive) set here is used to determine whether to only send data uris, and not urls, to the vision model
-			"trigger" => "!gem",
-			"base_url" => "https://generativelanguage.googleapis.com/v1beta/openai",
-			"key" => "", // https://aistudio.google.com/apikey
-			"model" => "gemini-2.5-flash-preview-05-20", // https://ai.google.dev/gemini-api/docs/models
-			"vision_model" => "gemini-2.5-flash-preview-05-20",
-		],
+//		[
+//			"name" => "Gemini", // note: "Gemini" (case-sensitive) set here is used to determine whether to only send data uris, and not urls, to the vision model. note llm-gemini.php plugin uses the native endpoint and has more features
+//			"trigger" => "!gem",
+//			"base_url" => "https://generativelanguage.googleapis.com/v1beta/openai",
+//			"key" => "", // https://aistudio.google.com/apikey
+//			"model" => "gemini-2.5-flash-preview-05-20", // https://ai.google.dev/gemini-api/docs/models
+//			"vision_model" => "gemini-2.5-flash-preview-05-20",
+//		],
 	],
 	"github_enabled" => true, // upload responses beyond X lines to github and output the link instead, e.g. https://user.github.io/?id
 	// how to setup github:
@@ -77,6 +77,7 @@ function llm_query()
 		break;
 	}
 
+	$time = time();
 	$args = trim($args);
 	$aa = explode(" ", $args);
 
@@ -173,7 +174,6 @@ function llm_query()
 	// add past messages
 	if ($llm_config["memory_enabled"]) {
 		if (!isset($llm_config["memory_items"])) $llm_config["memory_items"] = [];
-		$time = time();
 		// forget expired memories
 		if (!empty($llm_config["memory_items"][$service["name"]])) foreach (array_reverse($llm_config["memory_items"][$service["name"]], true) as $k => $mi) {
 			$age = $time - $mi->time;
@@ -268,10 +268,11 @@ function llm_query()
 	// remove markdown for non-paste/irc output
 	$c = $content;
 	$c = preg_replace("/^#{2,} /m", "$1", $c); // ## headers
-	$c = preg_replace("/\*\*(.*?)\*\*/", "$1", $c); // **...**
 	$c = preg_replace("/^( *?)\*/m", "$1", $c); // ul asterisks
 	$c = preg_replace("/^```[\w-]+?$\n?/m", "", $c); // fenced code header
 	$c = preg_replace("/^```$\n?/m", "", $c); // fenced code footer
+	$c = preg_replace("/(^|[^*])\*\*(.*?)\*\*([^*]|$)/m", "$1$2$3", $c); // bold
+	$c = preg_replace("/(^|[^*])\*(.*?)\*([^*]|$)/m", "$1$2$3", $c); // italic
 	// $c = preg_replace("/`(.*?)`/", "$1", $c); // backtick code
 
 	// get lines wrapped for irc
@@ -331,6 +332,8 @@ function llm_query()
 		} else $results = [["u", "t", $args], ["a", "t", $content]];
 		$file_data = new stdClass();
 		$file_data->s = $service["name"];
+		$file_data->m = $service["model"];
+		$file_data->t = $time;
 		$file_data->r = $results;
 
 		// upload file
