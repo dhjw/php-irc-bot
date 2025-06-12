@@ -201,7 +201,7 @@ while (1) {
 			}
 			send("WHOIS $nick\n"); // botmask detection
 			sleep(1);
-			send("JOIN $channel\n");
+			send("JOIN $channel" . ($channel_key ? " $channel_key" : '') . "\n");
 			$connect = false;
 			break;
 		}
@@ -309,7 +309,7 @@ while (1) {
 		// ping pong
 		if ($ex[0] == "PING") {
 			send_no_filter("PONG " . rtrim($ex[1]) . "\n");
-			if (!$in_channel) send("JOIN $channel\n");
+			if (!$in_channel) send("JOIN $channel" . ($channel_key ? " $channel_key" : '') . "\n");
 			continue;
 		}
 
@@ -384,7 +384,7 @@ while (1) {
 		if ($ex[1] == 'PART' || $ex[1] == 'QUIT' || $ex[1] == 'KICK') {
 			if (($ex[1] == 'PART' && isme()) || ($ex[1] == 'KICK' && $ex[3] == $nick)) { // left channel, rejoin
 				$in_channel = 0;
-				send("JOIN $channel\n");
+				send("JOIN $channel" . ($channel_key ? " $channel_key" : '') . "\n");
 				continue;
 			}
 			if ($ex[1] == 'KICK') $tmpnick = $ex[3]; else list($tmpnick) = parsemask($ex[0]);

@@ -6,6 +6,7 @@ $network = 'libera'; // supported: libera, rizon, gamesurge, freenode
 $host = 'ssl://irc.libera.chat:7000'; // ssl
 $server_pass = '';
 $channel = '##examplechan';
+$channel_key = '';
 $nick = 'somebot'; // default nick
 $test_channel = '##exampletest'; // run script as "php bot.php <instance> test" for test mode
 $test_nick = 'somebot[beta]';
