@@ -965,7 +965,7 @@ while (1) {
 					// imgur via api
 					// single image post ids are usually accessible as an image rather than an album so first check if an image then an album
 					if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?([\w-]+)(?:/([\w-]+))?#', $u, $m)) {
-						echo "getting from imgur api..\n";
+						echo "Getting from Imgur API... ";
 						if (!empty($m[3])) $id = $m[3]; else $id = $m[2];
 						$id = end(explode('-', $id));
 						$r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/image/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
@@ -984,17 +984,16 @@ while (1) {
 								$o = str_shorten((!empty($o) ? ' - ' : '') . $d, 280);
 							}
 							if (!empty($o)) {
+								echo "ok\n";
 								$o = "[ $o ]";
 								send("PRIVMSG $channel :$title_bold$o$title_bold\n");
 								continue(2);
 							} else {
-								// skip output unless ai image titles and (if not jpg/png) scrapingbee enabled (for i.imgur.com) and single image
-								if (!empty($ai_image_titles_enabled) && isset($r->data->type) && isset($r->data->link) && (preg_match('#image/(?:jpeg|png)#', $r->data->type) || (preg_match('#image/(?:webp|avif|gif)#', $r->data->type) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($r->data->link, PHP_URL_HOST), $scrapingbee_hosts))))) {
+								echo "No description, passing\n";
+								// use direct link, if not already, for ai image titles
+								if (isset($r->data->link)) {
 									$u = $r->data->link;
 									$parse_url = parse_url($u);
-								} else {
-									echo (!empty($m[1]) ? 'image' : 'post') . " exists but no description, skipping output\n";
-									continue(2);
 								}
 							}
 						}
