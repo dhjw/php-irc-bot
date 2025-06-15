@@ -963,38 +963,43 @@ while (1) {
 					$html = '';
 
 					// imgur via api
-					// single image post ids are usually accessible as an image rather than an album so first check if an image then an album
 					if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?([\w-]+)(?:/([\w-]+))?#', $u, $m)) {
-						echo "getting from imgur api..\n";
 						if (!empty($m[3])) $id = $m[3]; else $id = $m[2];
-						$id = end(explode('-', $id));
-						$r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/image/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
-						if (empty($r) || $r->status == 404) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/album/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
-						if (!empty($r) && !empty($r->data->section) && empty($r->data->title) && empty($r->data->description)) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/gallery/r/{$r->data->section}/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]])); // subreddit image. title and desc may always be empty but included to be safe
-						if (!empty($r) && $r->success == 1) {
-							// for i.* direct links default to image description, else default to post title
-							if (!empty($m[1])) if (!empty($r->data->description)) $d = $r->data->description; else $d = $r->data->title; else if (!empty($r->data->title)) $d = $r->data->title; else $d = $r->data->description;
-							// single image posts without an id the same as the first image (i.e. upload two images then delete one) should read first image description
-							if (empty($d) && !empty($r->data->is_album) && isset($r->data->images) && is_array($r->data->images) && count($r->data->images) == 1) $d = $r->data->images[0]->description;
-							$o = !empty($r->data->nsfw) ? 'NSFW' : '';
-							if (!empty($d)) {
-								$d = str_replace(["\r", "\n", "\t"], ' ', $d);
-								$d = preg_replace('/\s+/', ' ', $d);
-								$d = trim(strip_tags($d));
-								$o = str_shorten((!empty($o) ? ' - ' : '') . $d, 280);
-							}
-							if (!empty($o)) {
-								$o = "[ $o ]";
-								send("PRIVMSG $channel :$title_bold$o$title_bold\n");
-								continue(2);
-							} else {
-								// skip output unless ai image titles and (if not jpg/png) scrapingbee enabled (for i.imgur.com) and single image
-								if (!empty($ai_image_titles_enabled) && isset($r->data->type) && isset($r->data->link) && (preg_match('#image/(?:jpeg|png)#', $r->data->type) || (preg_match('#image/(?:webp|avif|gif)#', $r->data->type) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($r->data->link, PHP_URL_HOST), $scrapingbee_hosts))))) {
-									$u = $r->data->link;
-									$parse_url = parse_url($u);
-								} else {
-									echo (!empty($m[1]) ? 'image' : 'post') . " exists but no description, skipping output\n";
+						$id = explode('-', $id);
+						$id = end($id);
+						if ($id) {
+							echo "Getting from Imgur API... ";
+							$r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/image/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
+							if (empty($r) || $r->status == 404) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/album/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
+							if (!empty($r) && !empty($r->data->section) && empty($r->data->title) && empty($r->data->description)) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/gallery/r/{$r->data->section}/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]])); // subreddit image. title and desc may always be empty but included to be safe
+							if (!empty($r) && $r->success == 1) {
+								// for i.* direct links default to image description, else default to post title
+								if (!empty($m[1])) if (!empty($r->data->description)) $d = $r->data->description; else $d = $r->data->title; else if (!empty($r->data->title)) $d = $r->data->title; else $d = $r->data->description;
+								// single image posts without a desc should use first image
+								if (empty($d) && isset($r->data->images) && is_array($r->data->images) && count($r->data->images) == 1) {
+									echo "using single image in album... ";
+									$r = (object)['data' => $r->data->images[0]];
+									$d = $r->data->description;
+								}
+								$n = !empty($r->data->nsfw) ? 'NSFW' : '';
+								if (!empty($d)) {
+									$d = str_replace(["\r", "\n", "\t"], ' ', $d);
+									$d = preg_replace('/\s+/', ' ', $d);
+									$d = trim(strip_tags($d));
+									$o = str_shorten((!empty($n) ? ' - ' : '') . $d, 280);
+								} else $o = '';
+								if (!empty($o)) {
+									echo "ok\n";
+									$o = "[ $o ]";
+									send("PRIVMSG $channel :$title_bold$o$title_bold\n");
 									continue(2);
+								} else {
+									echo "No description, passing\n";
+									// use direct link, if not already, for ai image titles
+									if (isset($r->data->link)) {
+										$u = $r->data->link;
+										$parse_url = parse_url($u);
+									}
 								}
 							}
 						}
@@ -2013,7 +2018,7 @@ while (1) {
 					$title = preg_replace('/\s+/', ' ', $title);
 					$tmp = " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"; // unicode spaces, ltr, rtl
 					$title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
-					$notitletitles = [$parse_url["host"], 'imgur: the simple image sharer', 'Imgur', 'Imgur: The most awesome images on the Internet', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*'];
+					$notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*'];
 					foreach ($notitletitles as $ntt) {
 						if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
 							echo "Skipping output of title: $title\n";
