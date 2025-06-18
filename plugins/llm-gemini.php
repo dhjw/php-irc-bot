@@ -6,7 +6,7 @@
 $gem_config = [
 	"trigger" => "!gem",
 	"key" => "", // https://aistudio.google.com/apikey
-	"model" => "gemini-2.5-flash-preview-05-20", // https://ai.google.dev/gemini-api/docs/models
+	"model" => "gemini-2.5-flash", // https://ai.google.dev/gemini-api/docs/models
 	"url_context_enabled" => true, // https://ai.google.dev/gemini-api/docs/url-context
 	"google_search_enabled" => true, // https://ai.google.dev/gemini-api/docs/grounding
 	"github_enabled" => true, // upload responses beyond X lines to github and output the link instead, e.g. https://user.github.io/?id
