@@ -74,13 +74,12 @@ $scrapingbee_hosts = [ // set to 'all' or an array of hostnames. may not work fo
 	'archive.md',
 ];
 
-// direct image link summaries/titles. does not override other apis. currently only openai or x.ai supported as gemini doesn't accept urls which is bad for imgur bot protection
-$ai_image_titles_enabled = false;
+$ai_image_titles_enabled = false; // direct image link summaries/titles. does not override other apis
 $ai_image_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
 $ai_image_titles_baseurl = 'https://api.openai.com/v1'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
 $ai_image_titles_model = 'gpt-4o-mini'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
-$ai_image_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image" or "the chart", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial" or "offensive". keep it short!';
-$ai_image_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url (except i.imgur.com)
+$ai_image_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
+$ai_image_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url ('all' required for gemini)
 	'i.4pcdn.org',
 	'static-assets-1.truthsocial.com',
 ];
