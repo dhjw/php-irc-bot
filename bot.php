@@ -112,6 +112,7 @@ $reddit_token = '';
 $reddit_token_expires = 0;
 $spotify_token = '';
 $spotify_token_expires = 0;
+if (!isset($max_download_size)) $max_download_size = 26214400; // 25MiB
 
 while (1) {
 	if ($connect) {
@@ -1934,15 +1935,15 @@ while (1) {
 					if (!empty($tor_enabled) && (preg_match('#^https?://.*?\.onion(?:$|/)#', $u) || !empty($tor_all))) {
 						echo "getting url title via tor\n";
 						/** @noinspection HttpUrlsUsage */
-						$html = curlget([CURLOPT_URL => $u, CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME, CURLOPT_PROXY => "$tor_host:$tor_port", CURLOPT_CONNECTTIMEOUT => 60, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => $header], ['1MB_limit' => 1]);
+						$html = curlget([CURLOPT_URL => $u, CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME, CURLOPT_PROXY => "$tor_host:$tor_port", CURLOPT_CONNECTTIMEOUT => 60, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => $header]);
 						if (empty($html)) {
 							if (strpos($curl_error, "Failed to connect to $tor_host port $tor_port") !== false) send("PRIVMSG $channel :Tor error - is it running?\n"); elseif (strpos($curl_error, "Connection timed out after") !== false) send("PRIVMSG $channel :Tor connection timed out\n");
 							// else send("PRIVMSG $channel :Tor error or site down\n");
 							continue(2);
 						}
 					} else {
-						if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1, '1MB_limit' => 1]);
-						else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['1MB_limit' => 1]);
+						if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1]);
+						else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
 					}
 					// echo "response[2048/".strlen($html)."]=".print_r(substr($html,0,2048),true)."\n";
 					if (empty($html)) {
@@ -2109,9 +2110,11 @@ while (1) {
 
 function curlget($opts = [], $more_opts = [])
 {
-	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
+	global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $max_download_size, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
 
 	$parse_url = parse_url($opts[CURLOPT_URL]);
+	$curl_info = [];
+	$curl_error = '';
 
 	$is_scrapingbee = false;
 	if (!empty($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
@@ -2146,6 +2149,7 @@ function curlget($opts = [], $more_opts = [])
 		elseif (!empty($opts[CURLOPT_POST])) $cmd .= " -X POST";
 		if (!empty($opts[CURLOPT_POSTFIELDS])) $cmd .= ' -d ' . escapeshellarg($opts[CURLOPT_POSTFIELDS]);
 		if (!empty($opts[CURLOPT_NOBODY])) $cmd .= ' -I';
+		$cmd .= " --max-filesize $max_download_size";
 		$cmd .= ' ' . escapeshellarg($opts[CURLOPT_URL]);
 		// get stdout and stderr separately https://stackoverflow.com/a/25879953
 		$tries = 0; // retry on rare error
@@ -2174,6 +2178,7 @@ function curlget($opts = [], $more_opts = [])
 			'EFFECTIVE_URL' => $info->url_effective,
 			'RESPONSE_CODE' => $info->http_code
 		];
+		if ($info->exitcode == CURLE_FILESIZE_EXCEEDED) $curl_info['SIZE_ABORT'] = true;
 		$curl_error = $info->errormsg;
 	} else {
 		// PHP curl
@@ -2192,22 +2197,15 @@ function curlget($opts = [], $more_opts = [])
 		curl_setopt($ch, CURLOPT_MAXREDIRS, 7);
 		if (!empty($allow_invalid_certs)) curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 		curl_setopt($ch, CURLOPT_ENCODING, ''); // avoid gzipped result per http://stackoverflow.com/a/28295417
-		// partially read big connections per https://stackoverflow.com/a/17641159
-		curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($handle, $data) {
-			global $curl_response;
-			$curl_response .= $data;
-			if (!empty($more_opts["1MB_limit"]) && strlen($curl_response) > 1048576) { // up to 768KB required for amazon link titles
-				echo "aborting download at 1MB\n";
-				return 0;
-			} else return strlen($data);
-		});
+		curl_setopt($ch, CURLOPT_MAXFILESIZE, $max_download_size);
 		curl_setopt_array($ch, $opts);
-		curl_exec($ch);
+		$curl_response = curl_exec($ch);
 		$curl_info = [
 			'EFFECTIVE_URL' => curl_getinfo($ch, CURLINFO_EFFECTIVE_URL),
 			'RESPONSE_CODE' => curl_getinfo($ch, CURLINFO_RESPONSE_CODE)
 		];
 		$curl_error = curl_error($ch);
+		if (curl_errno($ch) == CURLE_FILESIZE_EXCEEDED || strpos($curl_error, 'Exceeded the maximum allowed file size') !== -1) $curl_info['SIZE_ABORT'] = true; // str check for PHP<8.4
 		curl_close($ch);
 	}
 

@@ -132,5 +132,6 @@ $disable_titles = false;
 $skip_dupe_output = false; // avoid repeating lines which can trigger some flood bots
 $title_cache_enabled = false; // shared between all bots running from same folder. recommended if cross-posting a lot
 $title_cache_size = 128;
+$max_download_size = 26214400; // skip curl requests if bigger than this
 
 // see readme.md at https://github.com/dhjw/php-irc-bot for how to use custom triggers, loop processes and plugins
