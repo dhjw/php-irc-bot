@@ -74,15 +74,17 @@ $scrapingbee_hosts = [ // set to 'all' or an array of hostnames. may not work fo
 	'archive.md',
 ];
 
-$ai_image_titles_enabled = false; // direct image link summaries/titles. does not override other apis
-$ai_image_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
-$ai_image_titles_baseurl = 'https://api.openai.com/v1'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
-$ai_image_titles_model = 'gpt-4o-mini'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
-$ai_image_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
-$ai_image_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url ('all' required for gemini)
+$ai_media_titles_enabled = false; // direct media link summaries/titles. jpg/png/webp/avif/gif images only unless $ai_media_titles_more_types enabled below
+$ai_media_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
+$ai_media_titles_baseurl = 'https://api.openai.com/v1'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
+$ai_media_titles_model = 'gpt-4o-mini'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
+$ai_media_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
+$ai_media_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI ('all' required, and automatic, for gemini)
 	'i.4pcdn.org',
 	'static-assets-1.truthsocial.com',
 ];
+// gemini can do videos and more. files > $max_download_size are skipped. see e.g. https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
+// $ai_media_titles_more_types = 'x-flv,quicktime,mpeg,mpegs,mpg,mp4,webm,wmv,3gpp,x-aac,flac,mp3,m4a,mpga,opus,pcm,wav,webm,pdf';
 
 // replace in retrieved titles
 $title_replaces = [
