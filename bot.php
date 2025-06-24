@@ -1367,7 +1367,7 @@ while (1) {
 							if (preg_match_all('#<a href=.*?>.*?</a>#', $b, $m) && !empty($m[0])) {
 								foreach ($m[0] as $v) {
 									preg_match('#<a href="([^"]*)".*>(.*)</a>#', $v, $m2); // m2[0] full anchor [1] href [2] text
-									if (preg_match('/^[@#]/', $m2[2])) {
+									if (preg_match('/^[@#$]/', $m2[2])) {
 										$b = str_replace($m2[0], $m2[2], $b);
 										continue;
 									}
