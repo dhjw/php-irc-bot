@@ -187,7 +187,6 @@ function gem_query()
 			];
 		}
 	}
-	// $data->user = hash("sha256", $channel . $incnick);
 
 	echo "[gem-request] data: " . json_encode($data) . "\n";
 	$r = curlget([
@@ -200,23 +199,14 @@ function gem_query()
 	], ["no_curl_impersonate" => 1]); // image data uris too big for escapeshellarg with curl_impersonate
 	$r = @json_decode($r);
 	if (empty($r)) {
-		if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) return send("PRIVMSG $target :" . $gem_config["name"] . " API error: timeout\n");
-		return send("PRIVMSG $target :" . $gem_config["name"] . " API error: no response\n");
+		if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) return send("PRIVMSG $target :API error: timeout\n");
+		return send("PRIVMSG $target :API error: no response\n");
 	}
 	echo "[gem-response] " . json_encode($r) . "\n";
-//	if (!empty($r->error)) return send("PRIVMSG $target :$r->error\n");
-//	if (!isset($r->choices[0]->message->content)) {
-//		if (is_array($r) && isset($r[0]->error->message)) return send("PRIVMSG $target :" . $gem_config["name"] . " API error: {$r[0]->error->message}\n");
-//		return send("PRIVMSG $target :" . $gem_config["name"] . " API error\n");
-//	}
-	if (!isset($r->candidates) || empty($r->candidates)) {
-		return send("PRIVMSG $target :" . $gem_config["name"] . " API error\n");
-	}
+	if (isset($r->error->message)) return send("PRIVMSG $target :API error: {$r->error->message}\n");
+	if (!isset($r->candidates) || empty($r->candidates)) return send("PRIVMSG $target :API error\n");
 	$response = "";
-	foreach ($r->candidates as $candidate) {
-		foreach ($candidate->content->parts as $p) $response .= $p->text;
-	}
-
+	foreach ($r->candidates as $candidate) foreach ($candidate->content->parts as $p) $response .= $p->text;
 
 	// append current request and response to memory
 	if ($gem_config["memory_enabled"]) {
