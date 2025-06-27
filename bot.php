@@ -986,6 +986,7 @@ while (1) {
 								}
 								$n = !empty($r->data->nsfw) ? 'NSFW' : '';
 								if (!empty($d)) {
+									$d = html_entity_decode($d);
 									$d = str_replace(["\r", "\n", "\t"], ' ', $d);
 									$d = preg_replace('/\s+/', ' ', $d);
 									$d = trim(strip_tags($d));
