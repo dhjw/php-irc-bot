@@ -946,6 +946,10 @@ while (1) {
 					continue(2);
 				}
 				$parse_url = parse_url($u);
+
+				// get final url for t.co links
+				if (preg_match("#^https://t\.co/#", $u)) $u = get_final_url($u);
+
 				// replace nitter hosts so they're processed as twitter
 				if (!empty($nitter_links_via_twitter) && !empty($nitter_hosts)) if (preg_match("#^https://(?:\w+?\.)?$nitter_hosts/pic/(?:orig/)?(?:\w+/)?(.*)#", $u, $m)) $u = 'https://pbs.twimg.com/' . preg_replace('#&format=\w+$#', '', urldecode($m[1])); else $u = preg_replace("#^https://$nitter_hosts/#", 'https://x.com/', $u);
 				// title cache
@@ -2425,11 +2429,13 @@ function get_url_hint($u)
 function get_final_url($u, $more_opts = ['no_body' => false, 'header' => []])
 {
 	global $curl_info;
+	$more_opts['no_body'] = $more_opts['no_body'] ?? false;
+	$more_opts['header'] = $more_opts['header'] ?? [];
 	curlget([
 		CURLOPT_URL => $u,
 		CURLOPT_NOBODY => $more_opts['no_body'] ? 1 : 0, // nobody failed for e.g. http://help.urbanup.com/14769269
 		CURLOPT_HTTPHEADER => $more_opts['header']
-	]);
+	], ['no_curl_impersonate' => 1]); // impersonate -L doesn't seem to get effective URL properly
 	return !empty($curl_info['EFFECTIVE_URL']) ? $curl_info['EFFECTIVE_URL'] : $u;
 }
 
