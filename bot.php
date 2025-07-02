@@ -104,7 +104,7 @@ $title_bold = !empty($title_bold) ? "\x02" : '';
 if (!empty($twitter_nitter_enabled) && empty($twitter_nitter_instance)) $twitter_nitter_instance = 'https://nitter.net';
 if (!empty($nitter_links_via_twitter)) {
 	$nitter_hosts_time = 0;
-	$nitter_hosts = "";
+	$nitter_hosts = '';
 	nitter_hosts_update();
 }
 $short_url_token_index = 0;
@@ -939,7 +939,14 @@ while (1) {
 			/** @noinspection RegExpSuspiciousBackref */
 			preg_match_all('#\bhttps?://(?:\b[a-z\d-]{1,63}\b\.)+[a-z]+(?::\d+)?(?:[/?\#](?:([^\s`!\[\]{}();\'"<>«»“”‘’]+)|\((?1)?\))+(?<![.,]))?#i', $msg, $m); // get urls, only capture parenthesis if both are found, ignore trailing periods and commas
 			if (!empty($m[0])) $urls = array_unique($m[0]); else $urls = [];
-			foreach ($urls as $u) {
+
+			for ($ui = 0; $ui < count($urls); $ui++) {
+				$u = $urls[$ui];
+				if ($ui === $last_ui) $u_tries++; else {
+					$u_tries = 1;
+					$last_ui = $ui;
+				}
+
 				$u = rtrim($u, pack('C', 0x01)); // trim for ACTIONs
 				foreach ($ignore_urls as $v) if (preg_match('#^\w*://(?:[a-zA-Z0-9-]+\.)*' . preg_quote($v) . '#', $u)) {
 					echo "Ignored URL $v\n";
@@ -961,437 +968,614 @@ while (1) {
 						continue;
 					}
 				}
-				$u_tries = 0;
 				$invidious_mirror = false;
 				$use_meta_tag = false;
-				$meta_skip_blank - false;
-				while (1) { // extra loop for retries
-					echo "Checking URL: $u\n";
-					$html = '';
+				$meta_skip_blank = false;
+				echo "Checking URL: $u\n";
+				$html = '';
 
-					// imgur via api
-					if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?([\w-]+)(?:/([\w-]+))?#', $u, $m)) {
-						if (!empty($m[3])) $id = $m[3]; else $id = $m[2];
-						$id = explode('-', $id);
-						$id = end($id);
-						if ($id) {
-							echo "Getting from Imgur API... ";
-							$r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/image/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
-							if (empty($r) || $r->status == 404) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/album/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
-							if (!empty($r) && !empty($r->data->section) && empty($r->data->title) && empty($r->data->description)) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/gallery/r/{$r->data->section}/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]])); // subreddit image. title and desc may always be empty but included to be safe
-							if (!empty($r) && $r->success == 1) {
-								// for i.* direct links default to image description, else default to post title
-								if (!empty($m[1])) if (!empty($r->data->description)) $d = $r->data->description; else $d = $r->data->title; else if (!empty($r->data->title)) $d = $r->data->title; else $d = $r->data->description;
-								// single image posts without a desc should use first image
-								if (empty($d) && isset($r->data->images) && is_array($r->data->images) && count($r->data->images) == 1) {
-									echo "using single image in album... ";
-									$r = (object)['data' => $r->data->images[0]];
-									$d = $r->data->description;
+				// imgur via api
+				if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?([\w-]+)(?:/([\w-]+))?#', $u, $m)) {
+					if (!empty($m[3])) $id = $m[3]; else $id = $m[2];
+					$id = explode('-', $id);
+					$id = end($id);
+					if ($id) {
+						echo "Getting from Imgur API... ";
+						$r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/image/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
+						if (empty($r) || $r->status == 404) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/album/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]]));
+						if (!empty($r) && !empty($r->data->section) && empty($r->data->title) && empty($r->data->description)) $r = json_decode(curlget([CURLOPT_URL => "https://api.imgur.com/3/gallery/r/{$r->data->section}/$id", CURLOPT_HTTPHEADER => ["Authorization: Client-ID $imgur_client_id"]])); // subreddit image. title and desc may always be empty but included to be safe
+						if (!empty($r) && $r->success == 1) {
+							// for i.* direct links default to image description, else default to post title
+							if (!empty($m[1])) if (!empty($r->data->description)) $d = $r->data->description; else $d = $r->data->title; else if (!empty($r->data->title)) $d = $r->data->title; else $d = $r->data->description;
+							// single image posts without a desc should use first image
+							if (empty($d) && isset($r->data->images) && is_array($r->data->images) && count($r->data->images) == 1) {
+								echo "using single image in album... ";
+								$r = (object)['data' => $r->data->images[0]];
+								$d = $r->data->description;
+							}
+							$n = !empty($r->data->nsfw) ? 'NSFW' : '';
+							if (!empty($d)) {
+								$d = html_entity_decode($d);
+								$d = str_replace(["\r", "\n", "\t"], ' ', $d);
+								$d = preg_replace('/\s+/', ' ', $d);
+								$d = trim(strip_tags($d));
+								$o = str_shorten((!empty($n) ? ' - ' : '') . $d, 280);
+							} else $o = '';
+							if (!empty($o)) {
+								echo "ok\n";
+								$o = "[ $o ]";
+								send("PRIVMSG $channel :$title_bold$o$title_bold\n");
+								continue;
+							} else {
+								echo "No description, passing\n";
+								// use direct link, if not already, for ai image titles
+								if (isset($r->data->link)) {
+									$u = $r->data->link;
+									$parse_url = parse_url($u);
 								}
-								$n = !empty($r->data->nsfw) ? 'NSFW' : '';
-								if (!empty($d)) {
-									$d = html_entity_decode($d);
-									$d = str_replace(["\r", "\n", "\t"], ' ', $d);
-									$d = preg_replace('/\s+/', ' ', $d);
-									$d = trim(strip_tags($d));
-									$o = str_shorten((!empty($n) ? ' - ' : '') . $d, 280);
-								} else $o = '';
-								if (!empty($o)) {
-									echo "ok\n";
-									$o = "[ $o ]";
-									send("PRIVMSG $channel :$title_bold$o$title_bold\n");
-									continue(2);
-								} else {
-									echo "No description, passing\n";
-									// use direct link, if not already, for ai image titles
-									if (isset($r->data->link)) {
-										$u = $r->data->link;
-										$parse_url = parse_url($u);
+							}
+						}
+					}
+				}
+
+				// imgbb, get direct link for ai
+				if (!empty($ai_media_titles_enabled) && preg_match('#^https?://(?:ibb\.co|imgbb\.com)/\w+$#', $u)) {
+					echo "Getting direct link for AI... ";
+					$dom = new DOMDocument();
+					if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . curlget([CURLOPT_URL => $u]))) {
+						$list = $dom->getElementsByTagName('input');
+						foreach ($list as $l) if (!empty($l->attributes->getNamedItem('id')) && $l->attributes->getNamedItem('id')->value == 'embed-code-3') { // use medium-sized image for speed. id is one less than when logged-in
+							preg_match('#\[img](.*)\[/img]#', $l->attributes->getNamedItem('value')->value, $m);
+							$u = $m[1];
+							break;
+						}
+					}
+					echo "$u\n";
+				}
+
+				// youtube via api, w/invidious mirror support
+				invidious:
+				if (!empty($youtube_api_key)) {
+					$yt = '';
+					if (preg_match('#^https?://(?:www\.|m\.|music\.)?(?:youtube\.com|invidio\.us)/(?:watch.*[?&]v=|embed/|shorts/|live/)([a-zA-Z0-9-_]+)#', $u, $m) || preg_match('#^https?://(?:youtu\.be|invidio\.us)/([a-zA-Z0-9-_]+)/?(?:$|\?)#', $u, $m)) $yt = 'v';
+					elseif (preg_match('#^https?://(?:www\.|m\.|music\.)?(?:youtube\.com|invidio\.us)/channel/([a-zA-Z0-9-_]+)/?(\w*)#', $u, $m)) $yt = 'c';
+					elseif (preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com|invidio\.us)/user/([a-zA-Z0-9-_]+)/?(\w*)#', $u, $m)) $yt = 'u';
+					elseif (preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com|invidio\.us)/@([^/]+)/?(\w*)#', $u, $m)) $yt = 'h';
+					elseif (preg_match('#^https?://(?:www\.|m\.|music\.)?(?:youtube\.com|invidio\.us)/playlist\?.*list=([a-zA-Z0-9-_]+)#', $u, $m)) $yt = 'p';
+					if (empty($yt)) { // custom channel URLs like /example or /c/example require scraping as no API endpoint
+						if (preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com|invidio\.us)/(?:c/)?([a-zA-Z0-9-_]+)/?(\w*)#', $u, $m)) {
+							$html = curlget([CURLOPT_URL => "https://www.youtube.com/$m[1]" . (!empty($m[2]) ? "/$m[2]" : '')]); // force load from youtube so indvidio.us works
+							$dom = new DOMDocument();
+							if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
+								$list = $dom->getElementsByTagName('link');
+								foreach ($list as $l) if (!empty($l->attributes->getNamedItem('rel')) && $l->attributes->getNamedItem('rel')->value == 'canonical') {
+									if (preg_match('#^https?://(?:www\.|m\.)?youtube\.com/channel/([a-zA-Z0-9-_]+)#', $l->attributes->getNamedItem('href')->value, $m2)) {
+										$m[1] = $m2[1];
+										$yt = 'c';
+										break;
 									}
 								}
 							}
 						}
 					}
-
-					// imgbb, get direct link for ai
-					if (!empty($ai_media_titles_enabled) && preg_match('#^https?://(?:ibb\.co|imgbb\.com)/\w+$#', $u)) {
-						echo "Getting direct link for AI... ";
-						$dom = new DOMDocument();
-						if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . curlget([CURLOPT_URL => $u]))) {
-							$list = $dom->getElementsByTagName('input');
-							foreach ($list as $l) if (!empty($l->attributes->getNamedItem('id')) && $l->attributes->getNamedItem('id')->value == 'embed-code-3') { // use medium-sized image for speed. id is one less than when logged-in
-								preg_match('#\[img](.*)\[/img]#', $l->attributes->getNamedItem('value')->value, $m);
-								$u = $m[1];
-								break;
+					if (!empty($yt)) {
+						if ($yt == 'v') $r = file_get_contents("https://www.googleapis.com/youtube/v3/videos?id=$m[1]&part=snippet,contentDetails,localizations&maxResults=1&type=video&key=$youtube_api_key"); elseif (in_array($yt, ['c', 'u', 'h'])) $r = file_get_contents("https://www.googleapis.com/youtube/v3/channels?" . ($yt == 'c' ? 'id' : ($yt == 'u' ? 'forUsername' : 'forHandle')) . "=$m[1]&part=id,snippet,localizations&maxResults=1&key=$youtube_api_key");
+						elseif ($yt == 'p') $r = file_get_contents("https://www.googleapis.com/youtube/v3/playlists?id=$m[1]&part=snippet,localizations&key=$youtube_api_key");
+						$r = json_decode($r);
+						$s = false;
+						if (empty($r)) {
+							send("PRIVMSG $channel :[ Temporary YouTube API error ]\n");
+							continue;
+						} elseif (empty($r->items)) {
+							if ($yt == 'v' && preg_match('#^https?://invidio\.us#', $u)) $s = true; // skip if invidious short url vid not found so other site pages work
+							else {
+								send("PRIVMSG $channel :" . ($yt == 'v' ? 'Video' : ($yt == 'c' ? 'Channel' : (($yt == 'u' || $yt == 'h') ? 'User' : ($yt == 'p' ? 'Playlist' : '')))) . " does not exist.\n");
+								continue;
 							}
 						}
-						echo "$u\n";
+						if (!$s) {
+							$x = '';
+							if ($yt == 'v') {
+								$d = covtime($r->items[0]->contentDetails->duration); // todo: text for live (P0D) & waiting to start (?)
+								if ($d <> '0:00') $x .= " - $d";
+							} elseif (in_array($yt, ['c', 'u', 'h'])) {
+								if (!empty($m[2]) && in_array($m[2], ['videos', 'playlists', 'community', 'channels', 'search'])) { // not home/featured or about
+									$x = ' - ' . ucfirst($m[2]);
+								} elseif (!empty($r->items[0]->snippet->description)) {
+									$d = isset($r->items[0]->localizations->en->description) ? $r->items[0]->localizations->en->description : $r->items[0]->snippet->description;
+									$d = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $d);
+									$x = ' - ' . str_shorten(trim(preg_replace('/\s+/', ' ', $d)), 148);
+								}
+							}
+							$t = "[ " . (isset($r->items[0]->localizations->en->title) ? $r->items[0]->localizations->en->title : $r->items[0]->snippet->title) . "$x ]";
+							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+							continue;
+						}
 					}
+				}
+				if ($invidious_mirror) goto invidious_continue; // mirror didnt hit api
 
-					// youtube via api, w/invidious mirror support
-					invidious:
-					if (!empty($youtube_api_key)) {
-						$yt = '';
-						if (preg_match('#^https?://(?:www\.|m\.|music\.)?(?:youtube\.com|invidio\.us)/(?:watch.*[?&]v=|embed/|shorts/|live/)([a-zA-Z0-9-_]+)#', $u, $m) || preg_match('#^https?://(?:youtu\.be|invidio\.us)/([a-zA-Z0-9-_]+)/?(?:$|\?)#', $u, $m)) $yt = 'v';
-						elseif (preg_match('#^https?://(?:www\.|m\.|music\.)?(?:youtube\.com|invidio\.us)/channel/([a-zA-Z0-9-_]+)/?(\w*)#', $u, $m)) $yt = 'c';
-						elseif (preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com|invidio\.us)/user/([a-zA-Z0-9-_]+)/?(\w*)#', $u, $m)) $yt = 'u';
-						elseif (preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com|invidio\.us)/@([^/]+)/?(\w*)#', $u, $m)) $yt = 'h';
-						elseif (preg_match('#^https?://(?:www\.|m\.|music\.)?(?:youtube\.com|invidio\.us)/playlist\?.*list=([a-zA-Z0-9-_]+)#', $u, $m)) $yt = 'p';
-						if (empty($yt)) { // custom channel URLs like /example or /c/example require scraping as no API endpoint
-							if (preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com|invidio\.us)/(?:c/)?([a-zA-Z0-9-_]+)/?(\w*)#', $u, $m)) {
-								$html = curlget([CURLOPT_URL => "https://www.youtube.com/$m[1]" . (!empty($m[2]) ? "/$m[2]" : '')]); // force load from youtube so indvidio.us works
-								$dom = new DOMDocument();
-								if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
-									$list = $dom->getElementsByTagName('link');
-									foreach ($list as $l) if (!empty($l->attributes->getNamedItem('rel')) && $l->attributes->getNamedItem('rel')->value == 'canonical') {
-										if (preg_match('#^https?://(?:www\.|m\.)?youtube\.com/channel/([a-zA-Z0-9-_]+)#', $l->attributes->getNamedItem('href')->value, $m2)) {
-											$m[1] = $m2[1];
-											$yt = 'c';
-											break;
+				// wikipedia
+				// todo: extracts on subdomains other than en.wikipedia.org, auto-translate?
+				if (preg_match("#^(?:https?://(?:[^/]*?\.)?wiki[pm]edia\.org/wiki/(.*)|https?://upload\.wikimedia\.org)#", $u, $m)) {
+					// handle file urls whether on upload.wikimedia.org thumb or full, direct or url hash
+					$f = '';
+					if (preg_match("#^https?://upload\.wikimedia\.org/wikipedia/.*/thumb/.*/(.*)/.*#", $u, $m2)) $f = $m2[1]; elseif (preg_match("#^https?://upload\.wikimedia\.org/wikipedia/commons/.*/(.*\.\w{3})#", $u, $m2)) $f = $m2[1];
+					elseif (preg_match("#^https?://(?:[^/]*?\.)?wiki[pm]edia\.org/wiki/File:(.*)#", $u, $m2)) $f = $m2[1];
+					elseif (preg_match("#^https?://(?:[^/]*?\.)?wikipedia\.org/wiki/[^\#]*\#/media/File:(.*)#", $u, $m2)) $f = $m2[1];
+					if (!empty($f)) {
+						if (strpos($f, '%') !== false) $f = urldecode($f);
+						echo "wikipedia media file: $f\n";
+						$r = curlget([CURLOPT_URL => 'https://en.wikipedia.org/w/api.php?action=query&format=json&prop=imageinfo&titles=File:' . urlencode($f) . '&iiprop=extmetadata']);
+						$r = json_decode($r, true);
+						if (!empty($r) && !empty($r['query']) && !empty($r['query']['pages'])) {
+							// not sure a file can have more than one desc/page, so just grab first one
+							$k = array_keys($r['query']['pages']);
+							if (!empty($r['query']['pages'][$k[0]])) {
+								$e = $r['query']['pages'][$k[0]]['imageinfo'][0]['extmetadata']['ImageDescription']['value'];
+								$e = strip_tags($e);
+								$e = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $e); // nbsp
+								$e = preg_replace('/\s+/', ' ', $e);
+								$e = html_entity_decode($e);
+								$e = trim($e);
+								$e = str_shorten($e, 280);
+							}
+							if (!empty($e)) {
+								$e = "[ $e ]";
+								send("PRIVMSG $channel :$title_bold$e$title_bold\n");
+								if ($title_cache_enabled) add_to_title_cache($u, $e);
+								continue;
+							}
+						}
+					} elseif (!empty($m[1])) { // not a file, not upload.wikimedia.org, has /wiki/.*
+						if (!preg_match("/^Category:/", $m[1])) {
+							$e = get_wiki_extract($m[1], 320);
+							// no bolding
+							if (!empty($e)) {
+								send("PRIVMSG $channel :\"$e\"\n"); // else send( "PRIVMSG $channel :Wiki
+								if ($title_cache_enabled) add_to_title_cache($u, "\"$e\"");
+								continue;
+							}
+						}
+					}
+				}
+
+				// spotify api
+				if (!empty($spotify_client_id) && preg_match("#^https://open.spotify.com/(\w+)/(\w+)#", $u, $m)) {
+					if (in_array($m[1], ['artist', 'playlist', 'show', 'episode', 'album', 'track']) && preg_match("#^[\w]+$#", $m[2])) {
+						if (empty($spotify_token) || $time >= $spotify_token_expires - 30) {
+							$j = json_decode(curlget([
+								CURLOPT_CUSTOMREQUEST => "POST",
+								CURLOPT_URL => "https://accounts.spotify.com/api/token",
+								CURLOPT_POSTFIELDS => "grant_type=client_credentials&client_id=$spotify_client_id&client_secret=$spotify_client_secret",
+							]));
+							if (isset($j->access_token)) {
+								$spotify_token = $j->access_token;
+								$spotify_token_expires = $time + $j->expires_in;
+							} else {
+								$spotify_token = "";
+								echo "Error getting Spotify token: " . print_r($j, true) . "\n";
+							}
+						}
+						if ($spotify_token) {
+							$r = json_decode(curlget([
+								CURLOPT_URL => "https://api.spotify.com/v1/$m[1]s/$m[2]",
+								CURLOPT_HTTPHEADER => ["Authorization: Bearer $spotify_token"]
+							]));
+							if (isset($r->name)) {
+								$r->name = trim($r->name); // an episode had a trailing space
+								if ($m[1] == 'artist') $t = "[ {$r->name} ]";
+								elseif ($m[1] == 'playlist') $t = "[ {$r->name} ]";
+								elseif ($m[1] == 'show') $t = "[ {$r->name} ]";
+								elseif ($m[1] == 'episode') $t = "[ {$r->name} - {$r->show->name} ]";
+								elseif ($m[1] == 'album') $t = "[ {$r->name} - {$r->artists[0]->name} ]";
+								elseif ($m[1] == 'track') $t = "[ {$r->name} - {$r->artists[0]->name} ]";
+								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+							} else {
+								if (isset($r->error->status) && in_array($r->error->status, [400, 404])) $t = ucfirst($m[1]) . " not found.";
+								elseif (isset($r->error->message)) $t = "API error: {$r->error->message}";
+								else $t = "API error.";
+								send("PRIVMSG $channel :$t\n");
+							}
+							continue;
+						}
+					}
+				}
+
+				// reddit get media url
+				if (preg_match("#^https://(?:\w+\.)?reddit\.com/media#", $u)) {
+					parse_str($parse_url["query"], $tmp);
+					if (!empty($tmp["url"])) $u = $tmp["url"];
+				}
+
+				// reddit auth
+				if (!empty($reddit_app_id) && (preg_match("#^https://(?:\w+\.)?reddit\.com/#", $u) || preg_match("#^https://(?:\w+\.)?redd\.it/#", $u))) {
+					if (empty($reddit_token) || $time >= $reddit_token_expires - 30) {
+						$j = json_decode(curlget([
+							CURLOPT_CUSTOMREQUEST => "POST",
+							CURLOPT_URL => "https://www.reddit.com/api/v1/access_token",
+							CURLOPT_USERPWD => "$reddit_app_id:$reddit_app_secret",
+							CURLOPT_POSTFIELDS => "grant_type=https://oauth.reddit.com/grants/installed_client&device_id=irc_link_previews_" . md5(gethostname())
+						]));
+						if (isset($j->access_token)) {
+							$reddit_token = $j->access_token;
+							$reddit_token_expires = $time + $j->expires_in;
+						} else {
+							$reddit_token = "";
+							echo "Error getting Reddit token: " . print_r($j, true) . "\n";
+						}
+					}
+				}
+
+				// reddit share urls - get final url
+				if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/[^/]*?/s/#", $u, $m)) $u = get_final_url($u, ['header' => [$reddit_token ? "Authorization: Bearer $reddit_token" : ""]]);
+
+				// reddit authed - use oauth subdomain
+				if ($reddit_token) $u = preg_replace('#^https://(?:\w+\.)?reddit\.com#', 'https://oauth.reddit.com', $u);
+
+				// reddit image
+				if (strpos($u, '.redd.it/') !== false) {
+					echo "getting reddit image title\n";
+					$q = substr($u, strpos($u, '.redd.it') + 1);
+					if (strpos($q, '?') !== false) $q = substr($q, 0, strpos($q, '?'));
+					for ($i = 2; $i > 0; $i--) { // 2 tries
+						$j = json_decode(curlget([CURLOPT_URL => "https://" . ($reddit_token ? "oauth" : "www") . ".reddit.com/search.json?q=site:redd.it+url:$q", CURLOPT_HTTPHEADER => [$reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
+						if (isset($j->data->children[0])) {
+							$t = "[ {$j->data->children[0]->data->title} ]";
+							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+							if ($title_cache_enabled) add_to_title_cache($u, $t);
+							continue(2);
+						}
+					}
+				}
+
+				// reddit comment
+				if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/.*?/.*?/([^/?]+)#", $u, $m)) {
+					if (strpos($m[1], '?') !== false) $m[1] = substr($m[1], 0, strpos($m[1], '?')); // id
+					$m[1] = rtrim($m[1], '/');
+					echo "getting reddit comment. id=$m[1]\n";
+					if (strpos($u, '?') !== false) $u = substr($u, 0, strpos($u, '?'));
+					for ($i = 2; $i > 0; $i--) { // 2 tries
+						$j = json_decode(curlget([CURLOPT_URL => "$u.json", CURLOPT_HTTPHEADER => ["Cookie: _options=%7B%22pref_quarantine_optin%22%3A%20true%7D", $reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
+						if (!empty($j)) {
+							if (!is_array($j) || !isset($j[1]->data->children[0]->data->id)) {
+								echo "unknown error. response=" . print_r($j, true);
+								break;
+							}
+							if ($j[1]->data->children[0]->data->id <> $m[1]) {
+								echo "error, comment id doesn't match\n";
+								break;
+							}
+							$a = $j[1]->data->children[0]->data->author;
+							$e = html_entity_decode($j[1]->data->children[0]->data->body_html, ENT_QUOTES); // 'body' has weird format sometimes, predecode for &amp;quot;
+							$e = preg_replace('#<blockquote>.*?</blockquote>#ms', ' (...) ', $e);
+							$e = preg_replace('#<code>(.*?)</code>#ms', " $1 ", $e);
+							$e = str_replace('<li>', ' • ', $e);
+							$e = format_extract($e);
+							if (!empty($e)) {
+								$t = "[ $a: \"$e\" ]";
+								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+								if ($title_cache_enabled) add_to_title_cache($u, $t);
+								continue(2);
+							} else echo "error parsing reddit comment from html\n";
+						} else echo "error getting reddit comment\n";
+						if ($i <> 1) sleep(1);
+					}
+				}
+
+				// reddit title
+				if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/[^/?]+#", $u, $m)) {
+					echo "getting reddit post title\n";
+					if (strpos($u, '?') !== false) $u = substr($u, 0, strpos($u, '?'));
+					for ($i = 2; $i > 0; $i--) { // 2 tries
+						$j = json_decode(curlget([CURLOPT_URL => "$u.json", CURLOPT_HTTPHEADER => ["Cookie: _options=%7B%22pref_quarantine_optin%22%3A%20true%7D", $reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
+						if (!empty($j)) {
+							if (!is_array($j) || !isset($j[0]->data->children[0]->data->title)) {
+								echo "unknown error. response=" . print_r($j, true);
+								break;
+							}
+							$t = $j[0]->data->children[0]->data->title;
+							$t = format_extract($t, 280, ['keep_quotes' => 1]);
+							if (!empty($t)) {
+								$t = "[ $t ]";
+								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+								if ($title_cache_enabled) add_to_title_cache($u, $t);
+								continue(2);
+							} else echo "error parsing reddit title from html\n";
+						} else echo "error getting reddit title\n";
+						if ($i <> 1) sleep(1);
+					}
+				}
+
+				// reddit general - ignore quarantine
+				if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/#", $u)) $header = ["Cookie: _options={%22pref_quarantine_optin%22:true}"];
+
+				// imdb
+				if (preg_match('#https?://(?:www.)?imdb.com/title/(tt\d*)/?(?:\?.*?)?$#', $u, $m)) {
+					echo "Found imdb link id $m[1]\n";
+					// same as !m by id, except no imdb link in output
+					$cmd = "https://www.omdbapi.com/?i=" . urlencode($m[1]) . "&apikey=$omdb_key";
+					echo "cmd=$cmd\n";
+					for ($i = $num_file_get_retries; $i > 0; $i--) {
+						$tmp = file_get_contents($cmd);
+						$tmp = json_decode($tmp);
+						print_r($tmp);
+						if (!empty($tmp)) break; else if ($i > 1) sleep(1);
+					}
+					if (empty($tmp)) {
+						send("PRIVMSG $channel :OMDB API error.\n");
+						continue;
+					}
+					if ($tmp->Type == 'movie') $tmp3 = ''; else $tmp3 = " $tmp->Type";
+					if ($tmp->Response == 'True') send("PRIVMSG $channel :\xe2\x96\xb6 $tmp->Title ($tmp->Year$tmp3) | $tmp->Genre | $tmp->Actors | \"$tmp->Plot\" [$tmp->imdbRating]\n"); elseif ($tmp->Response == 'False') send("PRIVMSG $channel :$tmp->Error\n");
+					else send("PRIVMSG $channel :OMDB API error.\n");
+					continue;
+				}
+
+				// outline.com
+				if (preg_match('#(?:https://)?outline\.com/([a-zA-Z0-9]*)(?:$|\?)#', $u, $m)) {
+					echo "outline.com url detected\n";
+					if (!empty($m[1])) {
+						$u = "https://outline.com/stat1k/$m[1].html";
+						$outline = true;
+					} else $outline = false;
+				} else $outline = false;
+
+				// twitter via Nitter
+				if (!empty($twitter_nitter_enabled)) {
+					// tweet
+					if (preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:\#!/)?\w+/status(?:es)?/(\d+)#', $u, $m)) {
+						echo "Getting tweet via Nitter\n";
+						$html = curlget([CURLOPT_URL => "$twitter_nitter_instance/x/status/$m[1]"]);
+						if (empty($html)) continue;
+						$html = str_replace('https://twitter.com', 'https://x.com', $html);
+						$dom = new DomDocument();
+						@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
+						$f = new DomXPath($dom);
+						// unavailable
+						$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'unavailable-box')]");
+						if (!empty($n) && $n->length > 0) {
+							if (strpos($n[0]->nodeValue, 'Age-restricted') !== false) {
+								$t = "[ Age-restricted. Log in required. ]";
+								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+								if ($title_cache_enabled) add_to_title_cache($u, $t);
+							}
+							echo "Tweet unavailable: {$n[0]->nodeValue}\n";
+							continue;
+						}
+						$n = $f->query("//div[contains(@id, 'm')]//a[contains(@class, 'fullname')]");
+						if (empty($n) || $n->length === 0) {
+							echo "no fullname\n";
+							continue;
+						}
+						$a = $n[0]->nodeValue;
+						$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'tweet-content')]");
+						if (empty($n) || $n->length === 0) {
+							echo "no tweet content\n";
+							continue;
+						}
+						$b = $n[0]->ownerDocument->saveHTML($n[0]); // get raw html incl anchor tags
+
+						$b = html_entity_decode($b);
+						$b = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $b);
+						$b = trim(preg_replace('/\s+/', ' ', $b));
+						$b = preg_replace('#^<div.*?>(.*)</div>$#', '$1', $b);
+						// if has quote-link save it and purge node so its attachments arent found
+						$ql = '';
+						$n = $f->query("//div[contains(@id, 'm')]//a[contains(@class, 'quote-link')]");
+						if (!empty($n) && $n->length > 0) {
+							$qh = $n[0]->getAttribute('href');
+							if (substr($qh, 0, 1) == '/') $qh = "https://x.com$qh"; // may always be true
+							$qh = preg_replace('/#m$/', '', $qh);
+							$ql = ' (re ' . make_short_url($qh) . ')';
+							$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'quote quote-big')]");
+							if (!empty($n) && $n->length > 0) $n[0]->parentNode->removeChild($n[0]);
+						}
+						// shorten and add hint for links, except ^@ and ^#
+						$hl = 0; // track hint lengths to increase max tweet length so never cut off
+						$b = preg_replace('#https?://nitter.net/#', 'https://x.com/', $b); // handling nitter.net is unreliable
+						if (preg_match_all('#<a href=.*?>.*?</a>#', $b, $m) && !empty($m[0])) {
+							foreach ($m[0] as $v) {
+								preg_match('#<a href="([^"]*)".*>(.*)</a>#', $v, $m2); // m2[0] full anchor [1] href [2] text
+								if (preg_match('/^[@#$]/', $m2[2])) {
+									$b = str_replace($m2[0], $m2[2], $b);
+									continue;
+								}
+								if (preg_match('#^https?://[^/]*/i/spaces/#', $m2[1])) {
+									// only link directly to space if mid-sentence as has no like, reply, etc.
+									if (preg_match('#' . preg_quote($m2[0]) . '$#', $b)) {
+										$b = preg_replace('#' . preg_quote($m2[0]) . '$#', '(space)', $b);
+										continue;
+									} else $m2[1] = preg_replace('#^https?://[^/]*/i/spaces/#', 'https://x.com/i/spaces/', $m2[1]);
+								}
+								if (substr($m2[1], 0, 1) == '/') $m2[1] = "https://x.com$m2[1]";
+								// shorten displayed link if possible, add hint if needed
+								$fu = get_final_url($m2[1], ['no_body' => 1]);
+								// if link same as quote-link and at beginning or end of tweet, remove it
+								$tmp = '/^' . preg_quote($m2[0], '/') . '|' . preg_quote($m2[0], '/') . '$/';
+								if ($fu == $qh && preg_match($tmp, $b)) {
+									$b = trim(preg_replace($tmp, '', $b));
+									continue;
+								}
+								$s = make_short_url($fu);
+								if (mb_strlen($s) < mb_strlen($m2[1])) $m2[1] = $s;
+								$h = get_url_hint($fu);
+								if ($h <> get_url_hint($m2[1])) {
+									if (mb_strlen("$m2[1] ($h)") < mb_strlen($fu)) {
+										$b = str_replace($m2[0], "$m2[1] ($h)", $b);
+										$hl += mb_strlen($h) + 3;
+									} else $b = str_replace($m2[0], $fu, $b); // no hint, final url < short+hint
+								} else $b = str_replace($m2[0], $m2[1], $b); // no hint, same as displayed domain
+							}
+						}
+						// strip additional handles at beginning of deep replies
+						if (substr($b, 0, 1) == '@') {
+							$front = true;
+							$tmps = explode(' ', $b);
+							foreach ($tmps as $k => $tmp) {
+								if ($k == 0) {
+									$tmp2 = $tmp;
+									continue;
+								}
+								if (substr($tmp, 0, 1) == '@' && $front) continue;
+								$front = false;
+								$tmp2 .= " $tmp";
+							}
+							$b = $tmp2;
+						}
+						// pre-finalize
+						$t = "$a: $b";
+						$t = str_shorten($t, mb_strlen($a) + 282 + $hl);
+						// count attachments
+						foreach (['image', 'gif', 'video'] as $m) {
+							$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'attachment') and contains(@class, '$m')]");
+							if (!empty($n) && $n->length > 0) $t = trim($t) . ($n->length == 1 ? " ($m)" : " ($n->length {$m}s)");
+						}
+						$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'poll')]");
+						if (!empty($n) && $n->length > 0) $t = trim($t) . ' (poll)';
+						$t .= $ql; // add quote link, no hint
+						// finalize and output
+						$t = "[ $t ]";
+						send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+						if ($title_cache_enabled) add_to_title_cache($u, $t);
+						continue;
+
+					} // bio
+					elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
+						continue;
+					}
+				}
+
+				// twitter via API
+				if (!empty($twitter_consumer_key)) {
+					// tweet
+					if (preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:\#!/)?\w+/status(?:es)?/(\d+)#', $u, $m)) {
+						echo "getting tweet via API.. ";
+						if (!empty($m[1])) {
+							$r = twitter_api('/statuses/show.json', ['id' => $m[1], 'tweet_mode' => 'extended']);
+							if (!empty($r) && !empty($r->full_text) && !empty($r->user->name)) {
+								$t = $r->full_text;
+								// remove twitter media URLs that lead back to the same tweet in long tweets
+								if (isset($r->entities->urls)) {
+									foreach ($r->entities->urls as $v) {
+										if (preg_match('#^https://(?:twitter|x)\.com/i/web/status/(\d+)#', $v->expanded_url, $m2)) {
+											if (!empty($m2[1]) && $m2[1] == $m[1]) {
+												$t = str_replace("… $v->url", ' ...', $t);
+												$t = trim(str_replace(" $v->url", ' ', $t));
+											}
 										}
 									}
 								}
-							}
-						}
-						if (!empty($yt)) {
-							if ($yt == 'v') $r = file_get_contents("https://www.googleapis.com/youtube/v3/videos?id=$m[1]&part=snippet,contentDetails,localizations&maxResults=1&type=video&key=$youtube_api_key"); elseif (in_array($yt, ['c', 'u', 'h'])) $r = file_get_contents("https://www.googleapis.com/youtube/v3/channels?" . ($yt == 'c' ? 'id' : ($yt == 'u' ? 'forUsername' : 'forHandle')) . "=$m[1]&part=id,snippet,localizations&maxResults=1&key=$youtube_api_key");
-							elseif ($yt == 'p') $r = file_get_contents("https://www.googleapis.com/youtube/v3/playlists?id=$m[1]&part=snippet,localizations&key=$youtube_api_key");
-							$r = json_decode($r);
-							$s = false;
-							if (empty($r)) {
-								send("PRIVMSG $channel :[ Temporary YouTube API error ]\n");
-								continue(2);
-							} elseif (empty($r->items)) {
-								if ($yt == 'v' && preg_match('#^https?://invidio\.us#', $u)) $s = true; // skip if invidious short url vid not found so other site pages work
-								else {
-									send("PRIVMSG $channel :" . ($yt == 'v' ? 'Video' : ($yt == 'c' ? 'Channel' : (($yt == 'u' || $yt == 'h') ? 'User' : ($yt == 'p' ? 'Playlist' : '')))) . " does not exist.\n");
-									continue(2);
+
+								$mcnt = 0;
+								$mtyp = '';
+								foreach ($r->extended_entities->media as $v) {
+									$mcnt++;
+									$mtyp = $v->type;
+									$t = str_replace($v->url, ' ', $t);
+									if (isset($v->additional_media_info->call_to_actions->watch_now)) $mtyp = 'video'; // weird embeds that show as photos but are actually videos
 								}
-							}
-							if (!$s) {
-								$x = '';
-								if ($yt == 'v') {
-									$d = covtime($r->items[0]->contentDetails->duration); // todo: text for live (P0D) & waiting to start (?)
-									if ($d <> '0:00') $x .= " - $d";
-								} elseif (in_array($yt, ['c', 'u', 'h'])) {
-									if (!empty($m[2]) && in_array($m[2], ['videos', 'playlists', 'community', 'channels', 'search'])) { // not home/featured or about
-										$x = ' - ' . ucfirst($m[2]);
-									} elseif (!empty($r->items[0]->snippet->description)) {
-										$d = isset($r->items[0]->localizations->en->description) ? $r->items[0]->localizations->en->description : $r->items[0]->snippet->description;
-										$d = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $d);
-										$x = ' - ' . str_shorten(trim(preg_replace('/\s+/', ' ', $d)), 148);
+								if ($mtyp == 'photo') $mtyp = 'image'; elseif ($mtyp == 'animated_gif') $mtyp = 'gif';
+								if ($mcnt > 0) $t .= ' ' . ($mcnt == 1 ? "($mtyp)" : "($mcnt {$mtyp}s)");
+								// add a hint for external links
+								foreach ($r->entities->urls as $v) {
+									$h = get_url_hint($v->expanded_url);
+									$t = str_replace($v->url, "$v->url ($h)", $t);
+								}
+								$t = str_replace(["\r\n", "\n", "\t"], ' ', $t);
+								$t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+								$t = trim(preg_replace('/\s+/', ' ', $t));
+								if (substr($t, 0, 1) == '@') { // strip additional handles at beginning of deep replies
+									$front = true;
+									$tmps = explode(' ', $t);
+									foreach ($tmps as $k => $tmp) {
+										if ($k == 0) {
+											$tmp2 = $tmp;
+											continue;
+										}
+										if (substr($tmp, 0, 1) == '@' && $front) continue;
+										$front = false;
+										$tmp2 .= " $tmp";
 									}
+									$t = $tmp2;
 								}
-								$t = "[ " . (isset($r->items[0]->localizations->en->title) ? $r->items[0]->localizations->en->title : $r->items[0]->snippet->title) . "$x ]";
+								$t = '[ ' . str_shorten("{$r->user->name}: $t") . ' ]';
 								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								continue(2);
-							}
-						}
-					}
-					if ($invidious_mirror) goto invidious_continue; // mirror didnt hit api
-
-					// wikipedia
-					// todo: extracts on subdomains other than en.wikipedia.org, auto-translate?
-					if (preg_match("#^(?:https?://(?:[^/]*?\.)?wiki[pm]edia\.org/wiki/(.*)|https?://upload\.wikimedia\.org)#", $u, $m)) {
-						// handle file urls whether on upload.wikimedia.org thumb or full, direct or url hash
-						$f = '';
-						if (preg_match("#^https?://upload\.wikimedia\.org/wikipedia/.*/thumb/.*/(.*)/.*#", $u, $m2)) $f = $m2[1]; elseif (preg_match("#^https?://upload\.wikimedia\.org/wikipedia/commons/.*/(.*\.\w{3})#", $u, $m2)) $f = $m2[1];
-						elseif (preg_match("#^https?://(?:[^/]*?\.)?wiki[pm]edia\.org/wiki/File:(.*)#", $u, $m2)) $f = $m2[1];
-						elseif (preg_match("#^https?://(?:[^/]*?\.)?wikipedia\.org/wiki/[^\#]*\#/media/File:(.*)#", $u, $m2)) $f = $m2[1];
-						if (!empty($f)) {
-							if (strpos($f, '%') !== false) $f = urldecode($f);
-							echo "wikipedia media file: $f\n";
-							$r = curlget([CURLOPT_URL => 'https://en.wikipedia.org/w/api.php?action=query&format=json&prop=imageinfo&titles=File:' . urlencode($f) . '&iiprop=extmetadata']);
-							$r = json_decode($r, true);
-							if (!empty($r) && !empty($r['query']) && !empty($r['query']['pages'])) {
-								// not sure a file can have more than one desc/page, so just grab first one
-								$k = array_keys($r['query']['pages']);
-								if (!empty($r['query']['pages'][$k[0]])) {
-									$e = $r['query']['pages'][$k[0]]['imageinfo'][0]['extmetadata']['ImageDescription']['value'];
-									$e = strip_tags($e);
-									$e = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $e); // nbsp
-									$e = preg_replace('/\s+/', ' ', $e);
-									$e = html_entity_decode($e);
-									$e = trim($e);
-									$e = str_shorten($e, 280);
-								}
-								if (!empty($e)) {
-									$e = "[ $e ]";
-									send("PRIVMSG $channel :$title_bold$e$title_bold\n");
-									if ($title_cache_enabled) add_to_title_cache($u, $e);
-									continue(2);
-								}
-							}
-						} elseif (!empty($m[1])) { // not a file, not upload.wikimedia.org, has /wiki/.*
-							if (!preg_match("/^Category:/", $m[1])) {
-								$e = get_wiki_extract($m[1], 320);
-								// no bolding
-								if (!empty($e)) {
-									send("PRIVMSG $channel :\"$e\"\n"); // else send( "PRIVMSG $channel :Wiki
-									if ($title_cache_enabled) add_to_title_cache($u, "\"$e\"");
-									continue(2);
-								}
-							}
-						}
-					}
-
-					// spotify api
-					if (!empty($spotify_client_id) && preg_match("#^https://open.spotify.com/(\w+)/(\w+)#", $u, $m)) {
-						if (in_array($m[1], ['artist', 'playlist', 'show', 'episode', 'album', 'track']) && preg_match("#^[\w]+$#", $m[2])) {
-							if (empty($spotify_token) || $time >= $spotify_token_expires - 30) {
-								$j = json_decode(curlget([
-									CURLOPT_CUSTOMREQUEST => "POST",
-									CURLOPT_URL => "https://accounts.spotify.com/api/token",
-									CURLOPT_POSTFIELDS => "grant_type=client_credentials&client_id=$spotify_client_id&client_secret=$spotify_client_secret",
-								]));
-								if (isset($j->access_token)) {
-									$spotify_token = $j->access_token;
-									$spotify_token_expires = $time + $j->expires_in;
-								} else {
-									$spotify_token = "";
-									echo "Error getting Spotify token: " . print_r($j, true) . "\n";
-								}
-							}
-							if ($spotify_token) {
-								$r = json_decode(curlget([
-									CURLOPT_URL => "https://api.spotify.com/v1/$m[1]s/$m[2]",
-									CURLOPT_HTTPHEADER => ["Authorization: Bearer $spotify_token"]
-								]));
-								if (isset($r->name)) {
-									$r->name = trim($r->name); // an episode had a trailing space
-									if ($m[1] == 'artist') $t = "[ {$r->name} ]";
-									elseif ($m[1] == 'playlist') $t = "[ {$r->name} ]";
-									elseif ($m[1] == 'show') $t = "[ {$r->name} ]";
-									elseif ($m[1] == 'episode') $t = "[ {$r->name} - {$r->show->name} ]";
-									elseif ($m[1] == 'album') $t = "[ {$r->name} - {$r->artists[0]->name} ]";
-									elseif ($m[1] == 'track') $t = "[ {$r->name} - {$r->artists[0]->name} ]";
-									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								} else {
-									if (isset($r->error->status) && in_array($r->error->status, [400, 404])) $t = ucfirst($m[1]) . " not found.";
-									elseif (isset($r->error->message)) $t = "API error: {$r->error->message}";
-									else $t = "API error.";
-									send("PRIVMSG $channel :$t\n");
-								}
-								continue(2);
-							}
-						}
-					}
-
-					// reddit get media url
-					if (preg_match("#^https://(?:\w+\.)?reddit\.com/media#", $u)) {
-						parse_str($parse_url["query"], $tmp);
-						if (!empty($tmp["url"])) $u = $tmp["url"];
-					}
-
-					// reddit auth
-					if (!empty($reddit_app_id) && (preg_match("#^https://(?:\w+\.)?reddit\.com/#", $u) || preg_match("#^https://(?:\w+\.)?redd\.it/#", $u))) {
-						if (empty($reddit_token) || $time >= $reddit_token_expires - 30) {
-							$j = json_decode(curlget([
-								CURLOPT_CUSTOMREQUEST => "POST",
-								CURLOPT_URL => "https://www.reddit.com/api/v1/access_token",
-								CURLOPT_USERPWD => "$reddit_app_id:$reddit_app_secret",
-								CURLOPT_POSTFIELDS => "grant_type=https://oauth.reddit.com/grants/installed_client&device_id=irc_link_previews_" . md5(gethostname())
-							]));
-							if (isset($j->access_token)) {
-								$reddit_token = $j->access_token;
-								$reddit_token_expires = $time + $j->expires_in;
 							} else {
-								$reddit_token = "";
-								echo "Error getting Reddit token: " . print_r($j, true) . "\n";
+								echo "failed. result=" . print_r($r, true);
+								if (!empty($r->errors) && ($r->errors[0]->code == 8 || $r->errors[0]->code == 144)) send("PRIVMSG $channel :Tweet not found.\n");
 							}
+							continue; // always abort, won't be a non-tweet URL
 						}
-					}
-
-					// reddit share urls - get final url
-					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/[^/]*?/s/#", $u, $m)) $u = get_final_url($u, ['header' => [$reddit_token ? "Authorization: Bearer $reddit_token" : ""]]);
-
-					// reddit authed - use oauth subdomain
-					if ($reddit_token) $u = preg_replace('#^https://(?:\w+\.)?reddit\.com#', 'https://oauth.reddit.com', $u);
-
-					// reddit image
-					if (strpos($u, '.redd.it/') !== false) {
-						echo "getting reddit image title\n";
-						$q = substr($u, strpos($u, '.redd.it') + 1);
-						if (strpos($q, '?') !== false) $q = substr($q, 0, strpos($q, '?'));
-						for ($i = 2; $i > 0; $i--) { // 2 tries
-							$j = json_decode(curlget([CURLOPT_URL => "https://" . ($reddit_token ? "oauth" : "www") . ".reddit.com/search.json?q=site:redd.it+url:$q", CURLOPT_HTTPHEADER => [$reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
-							if (isset($j->data->children[0])) {
-								$t = "[ {$j->data->children[0]->data->title} ]";
-								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								if ($title_cache_enabled) add_to_title_cache($u, $t);
-								continue(3);
-							}
-						}
-					}
-
-					// reddit comment
-					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/.*?/.*?/([^/?]+)#", $u, $m)) {
-						if (strpos($m[1], '?') !== false) $m[1] = substr($m[1], 0, strpos($m[1], '?')); // id
-						$m[1] = rtrim($m[1], '/');
-						echo "getting reddit comment. id=$m[1]\n";
-						if (strpos($u, '?') !== false) $u = substr($u, 0, strpos($u, '?'));
-						for ($i = 2; $i > 0; $i--) { // 2 tries
-							$j = json_decode(curlget([CURLOPT_URL => "$u.json", CURLOPT_HTTPHEADER => ["Cookie: _options=%7B%22pref_quarantine_optin%22%3A%20true%7D", $reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
-							if (!empty($j)) {
-								if (!is_array($j) || !isset($j[1]->data->children[0]->data->id)) {
-									echo "unknown error. response=" . print_r($j, true);
-									break;
-								}
-								if ($j[1]->data->children[0]->data->id <> $m[1]) {
-									echo "error, comment id doesn't match\n";
-									break;
-								}
-								$a = $j[1]->data->children[0]->data->author;
-								$e = html_entity_decode($j[1]->data->children[0]->data->body_html, ENT_QUOTES); // 'body' has weird format sometimes, predecode for &amp;quot;
-								$e = preg_replace('#<blockquote>.*?</blockquote>#ms', ' (...) ', $e);
-								$e = preg_replace('#<code>(.*?)</code>#ms', " $1 ", $e);
-								$e = str_replace('<li>', ' • ', $e);
-								$e = format_extract($e);
-								if (!empty($e)) {
-									$t = "[ $a: \"$e\" ]";
-									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-									if ($title_cache_enabled) add_to_title_cache($u, $t);
-									continue(3);
-								} else echo "error parsing reddit comment from html\n";
-							} else echo "error getting reddit comment\n";
-							if ($i <> 1) sleep(1);
-						}
-					}
-
-					// reddit title
-					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/[^/?]+#", $u, $m)) {
-						echo "getting reddit post title\n";
-						if (strpos($u, '?') !== false) $u = substr($u, 0, strpos($u, '?'));
-						for ($i = 2; $i > 0; $i--) { // 2 tries
-							$j = json_decode(curlget([CURLOPT_URL => "$u.json", CURLOPT_HTTPHEADER => ["Cookie: _options=%7B%22pref_quarantine_optin%22%3A%20true%7D", $reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
-							if (!empty($j)) {
-								if (!is_array($j) || !isset($j[0]->data->children[0]->data->title)) {
-									echo "unknown error. response=" . print_r($j, true);
-									break;
-								}
-								$t = $j[0]->data->children[0]->data->title;
-								$t = format_extract($t, 280, ['keep_quotes' => 1]);
-								if (!empty($t)) {
-									$t = "[ $t ]";
-									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-									if ($title_cache_enabled) add_to_title_cache($u, $t);
-									continue(3);
-								} else echo "error parsing reddit title from html\n";
-							} else echo "error getting reddit title\n";
-							if ($i <> 1) sleep(1);
-						}
-					}
-
-					// reddit general - ignore quarantine
-					if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/#", $u)) $header = ["Cookie: _options={%22pref_quarantine_optin%22:true}"];
-
-					// imdb
-					if (preg_match('#https?://(?:www.)?imdb.com/title/(tt\d*)/?(?:\?.*?)?$#', $u, $m)) {
-						echo "Found imdb link id $m[1]\n";
-						// same as !m by id, except no imdb link in output
-						$cmd = "https://www.omdbapi.com/?i=" . urlencode($m[1]) . "&apikey=$omdb_key";
-						echo "cmd=$cmd\n";
-						for ($i = $num_file_get_retries; $i > 0; $i--) {
-							$tmp = file_get_contents($cmd);
-							$tmp = json_decode($tmp);
-							print_r($tmp);
-							if (!empty($tmp)) break; else if ($i > 1) sleep(1);
-						}
-						if (empty($tmp)) {
-							send("PRIVMSG $channel :OMDB API error.\n");
-							continue(2);
-						}
-						if ($tmp->Type == 'movie') $tmp3 = ''; else $tmp3 = " $tmp->Type";
-						if ($tmp->Response == 'True') send("PRIVMSG $channel :\xe2\x96\xb6 $tmp->Title ($tmp->Year$tmp3) | $tmp->Genre | $tmp->Actors | \"$tmp->Plot\" [$tmp->imdbRating]\n"); elseif ($tmp->Response == 'False') send("PRIVMSG $channel :$tmp->Error\n");
-						else send("PRIVMSG $channel :OMDB API error.\n");
-						continue(2);
-					}
-
-					// outline.com
-					if (preg_match('#(?:https://)?outline\.com/([a-zA-Z0-9]*)(?:$|\?)#', $u, $m)) {
-						echo "outline.com url detected\n";
+						// bio
+					} elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
+						echo "getting twitter bio via API.. ";
 						if (!empty($m[1])) {
-							$u = "https://outline.com/stat1k/$m[1].html";
-							$outline = true;
-						} else $outline = false;
-					} else $outline = false;
-
-					// twitter via Nitter
-					if (!empty($twitter_nitter_enabled)) {
-						// tweet
-						if (preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:\#!/)?\w+/status(?:es)?/(\d+)#', $u, $m)) {
-							echo "Getting tweet via Nitter\n";
-							$html = curlget([CURLOPT_URL => "$twitter_nitter_instance/x/status/$m[1]"]);
-							if (empty($html)) continue(2);
-							$html = str_replace('https://twitter.com', 'https://x.com', $html);
-							$dom = new DomDocument();
-							@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
-							$f = new DomXPath($dom);
-							// unavailable
-							$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'unavailable-box')]");
-							if (!empty($n) && $n->length > 0) {
-								if (strpos($n[0]->nodeValue, 'Age-restricted') !== false) {
-									$t = "[ Age-restricted. Log in required. ]";
-									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-									if ($title_cache_enabled) add_to_title_cache($u, $t);
+							$r = twitter_api('/users/show.json', ['screen_name' => $m[1]]);
+							if (!empty($r) && empty($r->errors)) {
+								echo "ok\n";
+								$t = $r->name;
+								if (!empty($r->description)) {
+									$d = $r->description;
+									foreach ($r->entities->description->urls as $v) {
+										$h = get_url_hint($v->expanded_url);
+										$d = str_replace($v->url, "$v->url ($h)", $d);
+									}
+									$d = str_replace(["\r\n", "\n", "\t"], ' ', $d);
+									$d = html_entity_decode($d, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+									$d = trim(preg_replace('/\s+/', ' ', $d));
+									$t .= " | $d";
 								}
-								echo "Tweet unavailable: {$n[0]->nodeValue}\n";
-								continue(2);
+								if (!empty($r->url)) {
+									$u = $r->entities->url->urls[0]->expanded_url;
+									$u = preg_replace('#^(https?://[^/]*?)/$#', "$1", $u); // strip trailing slash on domain-only links
+									$t .= " | $u";
+								}
+								$t = "[ $t ]";
+								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+								continue; // only abort if found, else might be a non-profile URL
+							} else {
+								echo "failed. result=" . print_r($r, true);
+								// send("PRIVMSG $channel :Twitter user not found.\n");
 							}
-							$n = $f->query("//div[contains(@id, 'm')]//a[contains(@class, 'fullname')]");
-							if (empty($n) || $n->length === 0) {
-								echo "no fullname\n";
-								continue(2);
-							}
-							$a = $n[0]->nodeValue;
-							$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'tweet-content')]");
-							if (empty($n) || $n->length === 0) {
-								echo "no tweet content\n";
-								continue(2);
-							}
-							$b = $n[0]->ownerDocument->saveHTML($n[0]); // get raw html incl anchor tags
+						}
+					}
+				}
 
-							$b = html_entity_decode($b);
-							$b = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $b);
+				// truth social
+				if (preg_match('#^https?://truthsocial\.com/.*?(?:statuses|@\w+|posts)/(\d+)#', $u, $m)) {
+					if ($curl_impersonate_enabled) { // has high CF protection
+						// post
+						echo "Getting Truth via API\n";
+						$r = curlget([CURLOPT_URL => "https://truthsocial.com/api/v1/statuses/$m[1]"]);
+						$r = @json_decode($r);
+						if (isset($r->id)) {
+							// clean up content
+							$b = $r->content;
+							$b = html_entity_decode($b, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+							$b = str_replace(["\r\n", "\n", "\t"], ' ', $b);
+							$b = str_replace('…', '...', $b);
+							$b = str_replace("‘", "'", str_replace("’", "'", $b));  # fancy quotes
+							$b = str_replace("“", '"', str_replace("”", '"', $b));
+							$b = preg_replace("/^<p>/", "", $b);
+							$b = preg_replace("#</p>$#", "", $b);
+							$b = str_replace("</p><p>", "\n\n", $b);
+							$b = str_replace("<br/>", "\n", $b);
+							$b = str_replace("<br />", "\n", $b);
+							$b = preg_replace('#<span class="quote-inline">.*?</span>(.*)#s', "$1", $b);
+							$b = str_replace("￼ ", " ", str_replace(" ￼", " ", str_replace("￼", "", $b)));  # weird invis char
+							$b = preg_replace("/ +/", " ", $b);
+							$b = str_replace("https://truthsocial.com/tags/", "#", $b);
 							$b = trim(preg_replace('/\s+/', ' ', $b));
-							$b = preg_replace('#^<div.*?>(.*)</div>$#', '$1', $b);
-							// if has quote-link save it and purge node so its attachments arent found
-							$ql = '';
-							$n = $f->query("//div[contains(@id, 'm')]//a[contains(@class, 'quote-link')]");
-							if (!empty($n) && $n->length > 0) {
-								$qh = $n[0]->getAttribute('href');
-								if (substr($qh, 0, 1) == '/') $qh = "https://x.com$qh"; // may always be true
-								$qh = preg_replace('/#m$/', '', $qh);
-								$ql = ' (re ' . make_short_url($qh) . ')';
-								$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'quote quote-big')]");
-								if (!empty($n) && $n->length > 0) $n[0]->parentNode->removeChild($n[0]);
-							}
-							// shorten and add hint for links, except ^@ and ^#
+							// save quote link
+							$ql = !empty($r->quote) ? ' (re: ' . make_short_url($r->quote->url) . ')' : '';
+							// shorten and add hint for links
 							$hl = 0; // track hint lengths to increase max tweet length so never cut off
-							$b = preg_replace('#https?://nitter.net/#', 'https://x.com/', $b); // handling nitter.net is unreliable
 							if (preg_match_all('#<a href=.*?>.*?</a>#', $b, $m) && !empty($m[0])) {
 								foreach ($m[0] as $v) {
 									preg_match('#<a href="([^"]*)".*>(.*)</a>#', $v, $m2); // m2[0] full anchor [1] href [2] text
-									if (preg_match('/^[@#$]/', $m2[2])) {
-										$b = str_replace($m2[0], $m2[2], $b);
-										continue;
-									}
-									if (preg_match('#^https?://[^/]*/i/spaces/#', $m2[1])) {
-										// only link directly to space if mid-sentence as has no like, reply, etc.
-										if (preg_match('#' . preg_quote($m2[0]) . '$#', $b)) {
-											$b = preg_replace('#' . preg_quote($m2[0]) . '$#', '(space)', $b);
-											continue;
-										} else $m2[1] = preg_replace('#^https?://[^/]*/i/spaces/#', 'https://x.com/i/spaces/', $m2[1]);
-									}
-									if (substr($m2[1], 0, 1) == '/') $m2[1] = "https://x.com$m2[1]";
 									// shorten displayed link if possible, add hint if needed
 									$fu = get_final_url($m2[1], ['no_body' => 1]);
-									// if link same as quote-link and at beginning or end of tweet, remove it
-									$tmp = '/^' . preg_quote($m2[0], '/') . '|' . preg_quote($m2[0], '/') . '$/';
-									if ($fu == $qh && preg_match($tmp, $b)) {
-										$b = trim(preg_replace($tmp, '', $b));
-										continue;
-									}
 									$s = make_short_url($fu);
 									if (mb_strlen($s) < mb_strlen($m2[1])) $m2[1] = $s;
 									$h = get_url_hint($fu);
@@ -1403,665 +1587,479 @@ while (1) {
 									} else $b = str_replace($m2[0], $m2[1], $b); // no hint, same as displayed domain
 								}
 							}
-							// strip additional handles at beginning of deep replies
-							if (substr($b, 0, 1) == '@') {
-								$front = true;
-								$tmps = explode(' ', $b);
-								foreach ($tmps as $k => $tmp) {
-									if ($k == 0) {
-										$tmp2 = $tmp;
-										continue;
-									}
-									if (substr($tmp, 0, 1) == '@' && $front) continue;
-									$front = false;
-									$tmp2 .= " $tmp";
-								}
-								$b = $tmp2;
-							}
 							// pre-finalize
-							$t = "$a: $b";
-							$t = str_shorten($t, mb_strlen($a) + 282 + $hl);
+							$t = "{$r->account->display_name}: $b";
+							$t = str_shorten($t, mb_strlen($r->account->display_name) + 282 + $hl);
 							// count attachments
-							foreach (['image', 'gif', 'video'] as $m) {
-								$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'attachment') and contains(@class, '$m')]");
-								if (!empty($n) && $n->length > 0) $t = trim($t) . ($n->length == 1 ? " ($m)" : " ($n->length {$m}s)");
+							foreach (['image', 'gifv', 'tv', 'video'] as $m) {
+								$n = 0;
+								foreach ($r->media_attachments as $ma) if ($ma->type == $m) $n++;
+								if ($m == 'gifv') $m = 'gif';
+								if ($n > 0) $t = trim($t) . ($n == 1 ? " ($m)" : " ($n {$m}s)");
 							}
-							$n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'poll')]");
-							if (!empty($n) && $n->length > 0) $t = trim($t) . ' (poll)';
 							$t .= $ql; // add quote link, no hint
 							// finalize and output
 							$t = "[ $t ]";
 							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 							if ($title_cache_enabled) add_to_title_cache($u, $t);
-							continue(2);
-
-						} // bio
-						elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
-							continue(2);
-						}
-					}
-
-					// twitter via API
-					if (!empty($twitter_consumer_key)) {
-						// tweet
-						if (preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:\#!/)?\w+/status(?:es)?/(\d+)#', $u, $m)) {
-							echo "getting tweet via API.. ";
-							if (!empty($m[1])) {
-								$r = twitter_api('/statuses/show.json', ['id' => $m[1], 'tweet_mode' => 'extended']);
-								if (!empty($r) && !empty($r->full_text) && !empty($r->user->name)) {
-									$t = $r->full_text;
-									// remove twitter media URLs that lead back to the same tweet in long tweets
-									if (isset($r->entities->urls)) {
-										foreach ($r->entities->urls as $v) {
-											if (preg_match('#^https://twitter.com/i/web/status/(\d+)#', $v->expanded_url, $m2)) {
-												if (!empty($m2[1]) && $m2[1] == $m[1]) {
-													$t = str_replace("… $v->url", ' ...', $t);
-													$t = trim(str_replace(" $v->url", ' ', $t));
-												}
-											}
-										}
-									}
-
-									$mcnt = 0;
-									$mtyp = '';
-									foreach ($r->extended_entities->media as $v) {
-										$mcnt++;
-										$mtyp = $v->type;
-										$t = str_replace($v->url, ' ', $t);
-										if (isset($v->additional_media_info->call_to_actions->watch_now)) $mtyp = 'video'; // weird embeds that show as photos but are actually videos
-									}
-									if ($mtyp == 'photo') $mtyp = 'image'; elseif ($mtyp == 'animated_gif') $mtyp = 'gif';
-									if ($mcnt > 0) $t .= ' ' . ($mcnt == 1 ? "($mtyp)" : "($mcnt {$mtyp}s)");
-									// add a hint for external links
-									foreach ($r->entities->urls as $v) {
-										$h = get_url_hint($v->expanded_url);
-										$t = str_replace($v->url, "$v->url ($h)", $t);
-									}
-									$t = str_replace(["\r\n", "\n", "\t"], ' ', $t);
-									$t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-									$t = trim(preg_replace('/\s+/', ' ', $t));
-									if (substr($t, 0, 1) == '@') { // strip additional handles at beginning of deep replies
-										$front = true;
-										$tmps = explode(' ', $t);
-										foreach ($tmps as $k => $tmp) {
-											if ($k == 0) {
-												$tmp2 = $tmp;
-												continue;
-											}
-											if (substr($tmp, 0, 1) == '@' && $front) continue;
-											$front = false;
-											$tmp2 .= " $tmp";
-										}
-										$t = $tmp2;
-									}
-									$t = '[ ' . str_shorten("{$r->user->name}: $t") . ' ]';
-									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								} else {
-									echo "failed. result=" . print_r($r, true);
-									if (!empty($r->errors) && ($r->errors[0]->code == 8 || $r->errors[0]->code == 144)) send("PRIVMSG $channel :Tweet not found.\n");
-								}
-								continue(2); // always abort, won't be a non-tweet URL
-							}
-							// bio
-						} elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
-							echo "getting twitter bio via API.. ";
-							if (!empty($m[1])) {
-								$r = twitter_api('/users/show.json', ['screen_name' => $m[1]]);
-								if (!empty($r) && empty($r->errors)) {
-									echo "ok\n";
-									$t = $r->name;
-									if (!empty($r->description)) {
-										$d = $r->description;
-										foreach ($r->entities->description->urls as $v) {
-											$h = get_url_hint($v->expanded_url);
-											$d = str_replace($v->url, "$v->url ($h)", $d);
-										}
-										$d = str_replace(["\r\n", "\n", "\t"], ' ', $d);
-										$d = html_entity_decode($d, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-										$d = trim(preg_replace('/\s+/', ' ', $d));
-										$t .= " | $d";
-									}
-									if (!empty($r->url)) {
-										$u = $r->entities->url->urls[0]->expanded_url;
-										$u = preg_replace('#^(https?://[^/]*?)/$#', "$1", $u); // strip trailing slash on domain-only links
-										$t .= " | $u";
-									}
-									$t = "[ $t ]";
-									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-									continue(2); // only abort if found, else might be a non-profile URL
-								} else {
-									echo "failed. result=" . print_r($r, true);
-									// todo: output error and skip on standard url retry using an outside-loop var
-									// send("PRIVMSG $channel :Twitter user not found.\n");
-								}
-							}
-						}
-					}
-
-					// truth social
-					if (preg_match('#^https?://truthsocial\.com/.*?(?:statuses|@\w+|posts)/(\d+)#', $u, $m)) {
-						if ($curl_impersonate_enabled) { // has high CF protection
-							// post
-							echo "Getting Truth via API\n";
-							$r = curlget([CURLOPT_URL => "https://truthsocial.com/api/v1/statuses/$m[1]"]);
-							$r = @json_decode($r);
-							if (isset($r->id)) {
-								// clean up content
-								$b = $r->content;
-								$b = html_entity_decode($b, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-								$b = str_replace(["\r\n", "\n", "\t"], ' ', $b);
-								$b = str_replace('…', '...', $b);
-								$b = str_replace("‘", "'", str_replace("’", "'", $b));  # fancy quotes
-								$b = str_replace("“", '"', str_replace("”", '"', $b));
-								$b = preg_replace("/^<p>/", "", $b);
-								$b = preg_replace("#</p>$#", "", $b);
-								$b = str_replace("</p><p>", "\n\n", $b);
-								$b = str_replace("<br/>", "\n", $b);
-								$b = str_replace("<br />", "\n", $b);
-								$b = preg_replace('#<span class="quote-inline">.*?</span>(.*)#s', "$1", $b);
-								$b = str_replace("￼ ", " ", str_replace(" ￼", " ", str_replace("￼", "", $b)));  # weird invis char
-								$b = preg_replace("/ +/", " ", $b);
-								$b = str_replace("https://truthsocial.com/tags/", "#", $b);
-								$b = trim(preg_replace('/\s+/', ' ', $b));
-								// save quote link
-								$ql = !empty($r->quote) ? ' (re: ' . make_short_url($r->quote->url) . ')' : '';
-								// shorten and add hint for links
-								$hl = 0; // track hint lengths to increase max tweet length so never cut off
-								if (preg_match_all('#<a href=.*?>.*?</a>#', $b, $m) && !empty($m[0])) {
-									foreach ($m[0] as $v) {
-										preg_match('#<a href="([^"]*)".*>(.*)</a>#', $v, $m2); // m2[0] full anchor [1] href [2] text
-										// shorten displayed link if possible, add hint if needed
-										$fu = get_final_url($m2[1], ['no_body' => 1]);
-										$s = make_short_url($fu);
-										if (mb_strlen($s) < mb_strlen($m2[1])) $m2[1] = $s;
-										$h = get_url_hint($fu);
-										if ($h <> get_url_hint($m2[1])) {
-											if (mb_strlen("$m2[1] ($h)") < mb_strlen($fu)) {
-												$b = str_replace($m2[0], "$m2[1] ($h)", $b);
-												$hl += mb_strlen($h) + 3;
-											} else $b = str_replace($m2[0], $fu, $b); // no hint, final url < short+hint
-										} else $b = str_replace($m2[0], $m2[1], $b); // no hint, same as displayed domain
-									}
-								}
-								// pre-finalize
-								$t = "{$r->account->display_name}: $b";
-								$t = str_shorten($t, mb_strlen($r->account->display_name) + 282 + $hl);
-								// count attachments
-								foreach (['image', 'gifv', 'tv', 'video'] as $m) {
-									$n = 0;
-									foreach ($r->media_attachments as $ma) if ($ma->type == $m) $n++;
-									if ($m == 'gifv') $m = 'gif';
-									if ($n > 0) $t = trim($t) . ($n == 1 ? " ($m)" : " ($n {$m}s)");
-								}
-								$t .= $ql; // add quote link, no hint
-								// finalize and output
-								$t = "[ $t ]";
-								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								if ($title_cache_enabled) add_to_title_cache($u, $t);
-							} elseif (isset($r->error) and $r->error == 'Record not found') {
-								send("PRIVMSG $channel : Post does not exist.\n");
-							} else {
-								echo "Error getting Truth Social post. Result: " . print_r($r, true) . "\n";
-							}
+						} elseif (isset($r->error) and $r->error == 'Record not found') {
+							send("PRIVMSG $channel : Post does not exist.\n");
 						} else {
-							echo "Truth Social links require \$curl_impersonate_enabled\n";
+							echo "Error getting Truth Social post. Result: " . print_r($r, true) . "\n";
 						}
-						continue(2);
+					} else {
+						echo "Truth Social links require \$curl_impersonate_enabled\n";
 					}
+					continue;
+				}
 
-					// bluesky
-					// TODO convert to at-uri without loading page?
-					if (preg_match('#^https?://bsky.app/profile/[^/]+/post/[^/]+#', $u)) {
-						$html = curlget([CURLOPT_URL => $u]);
-						if ($curl_info['RESPONSE_CODE'] == 200) {
-							$dom = new DomDocument();
-							@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
-							$f = new DomXPath($dom);
-							$n = $f->query("/html/head/link[starts-with(@href,'at://')]");
-							if (!empty($n) && $n->length > 0) {
-								$at = $n->item(0)->getAttribute('href');
-								// echo "found bluesky at-uri $at\n";
-								$r = @json_decode(curlget([CURLOPT_URL => "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=$at"]));
-								if (!empty($r)) {
-									// print_r($r);
-									if (isset($r->posts[0])) {
-										// clean up content
-										$b = $r->posts[0]->record->text;
-										$b = html_entity_decode($b, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-										$b = str_replace(["\r\n", "\n", "\t"], ' ', $b);
-										$b = str_replace('…', '...', $b);
-										$b = str_replace("‘", "'", str_replace("’", "'", $b));  # fancy quotes
-										$b = str_replace("“", '"', str_replace("”", '"', $b));
-										$b = preg_replace('#(?<!\w)(@[\w-]+?)\.[\w-]+(?:\.[\w-]+)*#', "$1", $b);
-										$b = preg_replace("/ +/", " ", $b);
-										$b = trim(preg_replace('/\s+/', ' ', $b));
+				// bluesky
+				// TODO convert to at-uri without loading page?
+				if (preg_match('#^https?://bsky.app/profile/[^/]+/post/[^/]+#', $u)) {
+					$html = curlget([CURLOPT_URL => $u]);
+					if ($curl_info['RESPONSE_CODE'] == 200) {
+						$dom = new DomDocument();
+						@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
+						$f = new DomXPath($dom);
+						$n = $f->query("/html/head/link[starts-with(@href,'at://')]");
+						if (!empty($n) && $n->length > 0) {
+							$at = $n->item(0)->getAttribute('href');
+							// echo "found bluesky at-uri $at\n";
+							$r = @json_decode(curlget([CURLOPT_URL => "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=$at"]));
+							if (!empty($r)) {
+								// print_r($r);
+								if (isset($r->posts[0])) {
+									// clean up content
+									$b = $r->posts[0]->record->text;
+									$b = html_entity_decode($b, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+									$b = str_replace(["\r\n", "\n", "\t"], ' ', $b);
+									$b = str_replace('…', '...', $b);
+									$b = str_replace("‘", "'", str_replace("’", "'", $b));  # fancy quotes
+									$b = str_replace("“", '"', str_replace("”", '"', $b));
+									$b = preg_replace('#(?<!\w)(@[\w-]+?)\.[\w-]+(?:\.[\w-]+)*#', "$1", $b);
+									$b = preg_replace("/ +/", " ", $b);
+									$b = trim(preg_replace('/\s+/', ' ', $b));
 
-										// pre-finalize (TODO: process facet links first - see below)
-										$t = "{$r->posts[0]->author->displayName}: $b";
-										$t = str_shorten($t, mb_strlen($r->posts[0]->author->displayName) + 282); // + $hl
-										$ql = '';
-										if (!empty($r->posts[0]->record->embed)) {
-											$et = explode('.', $r->posts[0]->record->embed->{'$type'})[3];
-											if (($et == 'record' || $et == 'recordWithMedia') && strpos('/app.bsky.feed.post/', $r->posts[0]->record->embed->record->uri) !== -1) {
-												if (isset($r->posts[0]->record->embed->record->uri)) $uri = explode('/', $r->posts[0]->record->embed->record->uri);
-												else $uri = explode('/', $r->posts[0]->record->embed->record->record->uri);
-												$ql = ' (re: ' . make_short_url("https://bsky.app/profile/{$uri[2]}/post/{$uri[4]}") . ')';
-											}
-											if ($et == 'images' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->images))) {
-												if (isset($r->posts[0]->record->embed->images)) $n = count($r->posts[0]->record->embed->images);
-												else $n = count($r->posts[0]->record->embed->media->images);
-												$t = rtrim($t) . ' (' . ($n > 1 ? "$n " : '') . 'image' . ($n > 1 ? 's' : '') . ')';
-											}
-											if ($et == 'video' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->video))) {
-												$t = rtrim($t) . ' (video)';
-											}
-											if ($et == 'external' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->external))) {
-												if (isset($r->posts[0]->record->embed->external->uri)) $uri = $r->posts[0]->record->embed->external->uri;
-												else $uri = $r->posts[0]->record->embed->media->external->uri;
-
-												// if post text ends in part of the embed link, get rid of it
-												$tmp = explode(' ', $r->posts[0]->record->text);
-												$tmp = rtrim(trim($tmp[count($tmp) - 1]), '.');
-												$tmp2 = preg_replace('#^https?://#', '', $uri);
-												if (substr($tmp2, 0, strlen($tmp)) == $tmp) $t = trim(preg_replace('#' . preg_quote($tmp) . '\.+#', '', $t));
-
-												// add link at the end (post-shorten; not like twitter, etc)
-												$fu = get_final_url($uri, ['no_body' => 1]);
-												$s = make_short_url($fu);
-												if ($s <> $fu) {
-													$h = get_url_hint($fu);
-													if (mb_strlen("$s ($h)") < mb_strlen($fu)) $t = rtrim($t) . " $s ($h)";
-													else $t = rtrim($t) . " $fu";
-												} else $t = rtrim($t) . ' (link)'; // no short url, could be very long
-
-											}
-											// TODO facets, so mid-text / non-external embed links are processed properly, excluding duplicate externals. e.g. https://bsky.app/profile/propublica.org/post/3lmky7ypvhs2k https://bsky.app/profile/joshuajfriedman.com/post/3lmikawq2ds2j
+									// pre-finalize (TODO: process facet links first - see below)
+									$t = "{$r->posts[0]->author->displayName}: $b";
+									$t = str_shorten($t, mb_strlen($r->posts[0]->author->displayName) + 282); // + $hl
+									$ql = '';
+									if (!empty($r->posts[0]->record->embed)) {
+										$et = explode('.', $r->posts[0]->record->embed->{'$type'})[3];
+										if (($et == 'record' || $et == 'recordWithMedia') && strpos('/app.bsky.feed.post/', $r->posts[0]->record->embed->record->uri) !== -1) {
+											if (isset($r->posts[0]->record->embed->record->uri)) $uri = explode('/', $r->posts[0]->record->embed->record->uri);
+											else $uri = explode('/', $r->posts[0]->record->embed->record->record->uri);
+											$ql = ' (re: ' . make_short_url("https://bsky.app/profile/{$uri[2]}/post/{$uri[4]}") . ')';
 										}
-										$t = rtrim($t) . $ql; // add quote link, no hint
-										// finalize and output
-										$t = "[ $t ]";
-										send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-										if ($title_cache_enabled) add_to_title_cache($u, $t);
-										continue(2);
-									}
-								} else {
-									// post not found
-									echo "error reading bluesky post\n";
-								}
-							}
-						}
-					}
+										if ($et == 'images' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->images))) {
+											if (isset($r->posts[0]->record->embed->images)) $n = count($r->posts[0]->record->embed->images);
+											else $n = count($r->posts[0]->record->embed->media->images);
+											$t = rtrim($t) . ' (' . ($n > 1 ? "$n " : '') . 'image' . ($n > 1 ? 's' : '') . ')';
+										}
+										if ($et == 'video' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->video))) {
+											$t = rtrim($t) . ' (video)';
+										}
+										if ($et == 'external' || ($et == 'recordWithMedia' && !empty($r->posts[0]->record->embed->media->external))) {
+											if (isset($r->posts[0]->record->embed->external->uri)) $uri = $r->posts[0]->record->embed->external->uri;
+											else $uri = $r->posts[0]->record->embed->media->external->uri;
 
-					// tiktok
-					if (preg_match('#^https?://(?:www\.)?tiktok\.com/@[A-Za-z0-9._]+/video/\d+#', $u, $m)) {
-						$r = curlget([CURLOPT_URL => "https://www.tiktok.com/oembed?url=$m[0]"]);
-						$j = @json_decode($r);
-						if (isset($j->title) && isset($j->author_name)) {
-							$j->title = str_shorten(trim($j->title), 160);
-							$t = "{$j->author_name}: {$j->title}"; // author_name <= 30
-							$t = "[ $t ]";
-							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-							if ($title_cache_enabled) add_to_title_cache($u, $t);
-							continue(2);
-						} else {
-							echo "Error getting TikTok video URL details, got:\n" . trim($r) . "\n";
-						}
-					}
+											// if post text ends in part of the embed link, get rid of it
+											$tmp = explode(' ', $r->posts[0]->record->text);
+											$tmp = rtrim(trim($tmp[count($tmp) - 1]), '.');
+											$tmp2 = preg_replace('#^https?://#', '', $uri);
+											if (substr($tmp2, 0, strlen($tmp)) == $tmp) $t = trim(preg_replace('#' . preg_quote($tmp) . '\.+#', '', $t));
 
-					// instagram
-					if (preg_match('#https?://(?:www\.)?instagram\.com/p/([A-Za-z0-9-_]*)#', $u, $m)) {
-						echo "getting instagram post info\n";
-						if (!empty($m[1])) {
-							$t = '';
-							$r = @json_decode(file_get_contents("https://www.instagram.com/p/$m[1]/?__a=1"));
-							if (!empty($r) && !empty($r->graphql->shortcode_media)) {
-								$m = $r->graphql->shortcode_media;
-								$i = 0;
-								$v = 0;
-								if ($m->__typename == 'GraphImage') $i = 1; elseif ($m->__typename == 'GraphVideo') $v = 1;
-								elseif ($m->__typename == 'GraphSidecar') {
-									foreach ($m->edge_sidecar_to_children->edges as $a) {
-										if ($a->node->__typename == 'GraphImage') $i++; elseif ($a->node->__typename == 'GraphVideo') $v++;
+											// add link at the end (post-shorten; not like twitter, etc)
+											$fu = get_final_url($uri, ['no_body' => 1]);
+											$s = make_short_url($fu);
+											if ($s <> $fu) {
+												$h = get_url_hint($fu);
+												if (mb_strlen("$s ($h)") < mb_strlen($fu)) $t = rtrim($t) . " $s ($h)";
+												else $t = rtrim($t) . " $fu";
+											} else $t = rtrim($t) . ' (link)'; // no short url, could be very long
+
+										}
+										// TODO facets, so mid-text / non-external embed links are processed properly, excluding duplicate externals. e.g. https://bsky.app/profile/propublica.org/post/3lmky7ypvhs2k https://bsky.app/profile/joshuajfriedman.com/post/3lmikawq2ds2j
 									}
-								}
-								if ($i > 0 || $v > 0) {
-									if ($i > 0 && $v > 0) $p = "$i image" . ($i > 1 ? 's' : '') . ", $v video" . ($v > 1 ? 's' : ''); else {
-										if ($i > 0) $p = $i == 1 ? 'image' : "$i images"; elseif ($v > 0) $p = $v == 1 ? 'video' : "$v videos";
-									}
-								} else $p = '';
-								$c = $m->edge_media_to_caption->edges[0]->node->text;
-								// $n=$m->owner->username;
-								$f = $r->graphql->shortcode_media->owner->full_name;
-								if (!empty($n)) {
-									if (!empty($c)) {
-										$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', "$f: $c");
-										$t = trim(preg_replace('/\s+/', ' ', $t));
-										$t = str_shorten($t, 280);
-									} else $t = "$n:";
-									if (!empty($p)) $t .= " ($p)";
+									$t = rtrim($t) . $ql; // add quote link, no hint
+									// finalize and output
 									$t = "[ $t ]";
 									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 									if ($title_cache_enabled) add_to_title_cache($u, $t);
-									continue(2);
+									continue;
 								}
+							} else {
+								// post not found
+								echo "error reading bluesky post\n";
 							}
 						}
 					}
+				}
 
-					# Facebook
-					if (preg_match('#^https?://(?:www\.)?facebook\.com/reel/(\d+)#', $u, $m)) $use_meta_tag = 'description';
-					if (preg_match('#^https?://(?:www\.)?facebook\.com/photo/#', $u, $m)) $use_meta_tag = 'description';
-
-					// parler posts
-					if (preg_match('#^https?://(?:share\.par\.pw/post/|parler\.com/post-view\?q=)(\w*)#', $u, $m)) {
-						$html = curlget([CURLOPT_URL => "https://share.par.pw/post/$m[1]"]);
-						$dom = new DOMDocument();
-						if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
-							$x = new DOMXPath($dom);
-							list($n) = $x->query('//*[@id="ud--name"]');
-							$a = $n->textContent;
-							list($n) = $x->query('//*[@id="post--content"]/p');
-							$b = $n->textContent;
-							if (!empty($a) && !empty($b)) {
-								$t = strip_tags(html_entity_decode("$a: $b", ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-								$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $t);
-								$t = trim(preg_replace('/\s+/', ' ', $t));
-								$t = str_shorten($t, 424, ['less' => 13]);
-								// seems to randomly show post image or require login, require login for all links, randomly show author avatar if no image, may not display link/media even if it exists, and cant tell between links or media..  which is dumb. so we'll just add (link/media) when its clear there's a link or media and skip avatar images
-								list($n) = $x->query('//*[@id="media-placeholder--wrapper"]');
-								$c = $n->textContent;
-								if (!empty($c)) {
-									if (strpos($c, 'you must be logged in') !== false) $t .= ' (link/media)'; // $t.=' (media-login)';
-									else {
-										list($n) = $x->query('//*[@id="ud--avatar"]/img/@src');
-										$ai = $n->textContent;
-										list($n) = $x->query('//*[@id="media--placeholder"]/@src');
-										$pi = $n->textContent;
-										if ($pi <> $ai) $t .= ' (link/media)'; // not avatar of author
-									}
-								}
-								$t = '[ ' . trim($t) . ' ]';
-								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								if ($title_cache_enabled) add_to_title_cache($u, $t);
-							} else {
-								send("PRIVMSG $channel :[ Post not found ]\n");
-								if ($title_cache_enabled) add_to_title_cache($u, "[ Post not found ]");
-							}
-							continue(2);
-						} else echo "Error parsing Parler HTML\n";
-					}
-
-					// parler profile
-					if (preg_match('#^https?://parler\.com/profile/(\w*)/(\w*)#', $u, $m)) {
-						$t = "[ @$m[1] - " . ucfirst($m[2]) . " ]";
+				// tiktok
+				if (preg_match('#^https?://(?:www\.)?tiktok\.com/@[A-Za-z0-9._]+/video/\d+#', $u, $m)) {
+					$r = curlget([CURLOPT_URL => "https://www.tiktok.com/oembed?url=$m[0]"]);
+					$j = @json_decode($r);
+					if (isset($j->title) && isset($j->author_name)) {
+						$j->title = str_shorten(trim($j->title), 160);
+						$t = "{$j->author_name}: {$j->title}"; // author_name <= 30
+						$t = "[ $t ]";
 						send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 						if ($title_cache_enabled) add_to_title_cache($u, $t);
-						continue(2);
+						continue;
+					} else {
+						echo "Error getting TikTok video URL details, got:\n" . trim($r) . "\n";
 					}
+				}
 
-					// twitch via api
-					if (!empty($twitch_client_id) && preg_match('#https?://(?:www\.)?twitch\.tv/(\w+)(/\w+)?#', $u, $m)) {
-						// get token, don't revalidate because won't be revoked - https://dev.twitch.tv/docs/authentication
-						echo "Getting Twitch token.. ";
-						if (empty($twitch_token) || $twitch_token_expires < time()) {
-							$r = json_decode(curlget([CURLOPT_URL => "https://id.twitch.tv/oauth2/token?client_id=$twitch_client_id=&client_secret=$twitch_client_secret&grant_type=client_credentials", CURLOPT_POST => 1, CURLOPT_HTTPHEADER => ["Client-ID: $twitch_client_id"]]));
-							if (!empty($r) && !empty($r->access_token)) {
-								echo "ok.\n";
-								$twitch_token = $r->access_token;
-								$twitch_token_expires = time() + $r->expires_in - 30;
-							} else {
-								if (isset($r->message)) echo "error: $r->message\n"; else echo "error, r=" . print_r($r, true);
-								$t = '[ API error ]';
-								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								$twitch_token = '';
-								$twitch_token_expires = 0;
-								continue(2);
+				// instagram
+				if (preg_match('#https?://(?:www\.)?instagram\.com/p/([A-Za-z0-9-_]*)#', $u, $m)) {
+					echo "getting instagram post info\n";
+					if (!empty($m[1])) {
+						$t = '';
+						$r = @json_decode(file_get_contents("https://www.instagram.com/p/$m[1]/?__a=1"));
+						if (!empty($r) && !empty($r->graphql->shortcode_media)) {
+							$m = $r->graphql->shortcode_media;
+							$i = 0;
+							$v = 0;
+							if ($m->__typename == 'GraphImage') $i = 1; elseif ($m->__typename == 'GraphVideo') $v = 1;
+							elseif ($m->__typename == 'GraphSidecar') {
+								foreach ($m->edge_sidecar_to_children->edges as $a) {
+									if ($a->node->__typename == 'GraphImage') $i++; elseif ($a->node->__typename == 'GraphVideo') $v++;
+								}
 							}
-						} else echo "ok.\n";
-						if (!empty($twitch_token)) {
-							// get user info - https://dev.twitch.tv/docs/api/reference#get-users
-							echo "Getting user info for \"$m[1]\".. ";
-							$r = json_decode(curlget([CURLOPT_URL => "https://api.twitch.tv/helix/users?login=$m[1]", CURLOPT_HTTPHEADER => ["Client-ID: $twitch_client_id", "Authorization: Bearer $twitch_token"]]));
-							if (!empty($r) && isset($r->data)) {
-								if (isset($r->data[0])) {
-									echo "ok.\n";
-									$un = $r->data[0]->display_name;
-									$ud = $r->data[0]->description; // shorten
-									if (!empty($m[2])) {
-										// just show subdir
-										$t = "[ $un: " . ucfirst(substr($m[2], 1)) . " ]";
-										send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-										continue(2);
-									} else {
-										// get live stream info - https://dev.twitch.tv/docs/api/reference#get-streams-metadata
-										echo "Getting live stream info.. ";
-										$r = json_decode(curlget([CURLOPT_URL => "https://api.twitch.tv/helix/streams?user_login=$m[1]", CURLOPT_HTTPHEADER => ["Client-ID: $twitch_client_id", "Authorization: Bearer $twitch_token"]]));
-										if (!empty($r) && isset($r->data)) {
-											if (count($r->data) > 0) {
-												// check for live stream
-												foreach ($r->data as $d) if ($d->type == 'live') {
-													echo "ok.\n";
-													$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $d->title);
-													$t = trim(preg_replace('/\s+/', ' ', $t));
-													$t = str_shorten($t, 424);
-													$t = "[ $t ]";
-													send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-													continue(3);
-												}
-											}
-											// no streams, show user info
-											echo "not streaming\n";
-											$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', "$un: $ud");
-											$t = trim(preg_replace('/\s+/', ' ', $t));
-											$t = str_shorten($t, 424);
-											$t = "[ $t ]";
-											send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-											continue(2);
-										} else {
-											if (isset($r->message)) echo "error: $r->message\n"; else echo "error, r=" . print_r($r, true);
-										}
-									}
+							if ($i > 0 || $v > 0) {
+								if ($i > 0 && $v > 0) $p = "$i image" . ($i > 1 ? 's' : '') . ", $v video" . ($v > 1 ? 's' : ''); else {
+									if ($i > 0) $p = $i == 1 ? 'image' : "$i images"; elseif ($v > 0) $p = $v == 1 ? 'video' : "$v videos";
+								}
+							} else $p = '';
+							$c = $m->edge_media_to_caption->edges[0]->node->text;
+							// $n=$m->owner->username;
+							$f = $r->graphql->shortcode_media->owner->full_name;
+							if (!empty($n)) {
+								if (!empty($c)) {
+									$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', "$f: $c");
+									$t = trim(preg_replace('/\s+/', ' ', $t));
+									$t = str_shorten($t, 280);
+								} else $t = "$n:";
+								if (!empty($p)) $t .= " ($p)";
+								$t = "[ $t ]";
+								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+								if ($title_cache_enabled) add_to_title_cache($u, $t);
+								continue;
+							}
+						}
+					}
+				}
+
+				# Facebook
+				if (preg_match('#^https?://(?:www\.)?facebook\.com/reel/(\d+)#', $u, $m)) $use_meta_tag = 'description';
+				if (preg_match('#^https?://(?:www\.)?facebook\.com/photo/#', $u, $m)) $use_meta_tag = 'description';
+
+				// parler posts
+				if (preg_match('#^https?://(?:share\.par\.pw/post/|parler\.com/post-view\?q=)(\w*)#', $u, $m)) {
+					$html = curlget([CURLOPT_URL => "https://share.par.pw/post/$m[1]"]);
+					$dom = new DOMDocument();
+					if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
+						$x = new DOMXPath($dom);
+						list($n) = $x->query('//*[@id="ud--name"]');
+						$a = $n->textContent;
+						list($n) = $x->query('//*[@id="post--content"]/p');
+						$b = $n->textContent;
+						if (!empty($a) && !empty($b)) {
+							$t = strip_tags(html_entity_decode("$a: $b", ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+							$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $t);
+							$t = trim(preg_replace('/\s+/', ' ', $t));
+							$t = str_shorten($t, 424, ['less' => 13]);
+							// seems to randomly show post image or require login, require login for all links, randomly show author avatar if no image, may not display link/media even if it exists, and cant tell between links or media..  which is dumb. so we'll just add (link/media) when its clear there's a link or media and skip avatar images
+							list($n) = $x->query('//*[@id="media-placeholder--wrapper"]');
+							$c = $n->textContent;
+							if (!empty($c)) {
+								if (strpos($c, 'you must be logged in') !== false) $t .= ' (link/media)'; // $t.=' (media-login)';
+								else {
+									list($n) = $x->query('//*[@id="ud--avatar"]/img/@src');
+									$ai = $n->textContent;
+									list($n) = $x->query('//*[@id="media--placeholder"]/@src');
+									$pi = $n->textContent;
+									if ($pi <> $ai) $t .= ' (link/media)'; // not avatar of author
+								}
+							}
+							$t = '[ ' . trim($t) . ' ]';
+							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+							if ($title_cache_enabled) add_to_title_cache($u, $t);
+						} else {
+							send("PRIVMSG $channel :[ Post not found ]\n");
+							if ($title_cache_enabled) add_to_title_cache($u, "[ Post not found ]");
+						}
+						continue;
+					} else echo "Error parsing Parler HTML\n";
+				}
+
+				// parler profile
+				if (preg_match('#^https?://parler\.com/profile/(\w*)/(\w*)#', $u, $m)) {
+					$t = "[ @$m[1] - " . ucfirst($m[2]) . " ]";
+					send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+					if ($title_cache_enabled) add_to_title_cache($u, $t);
+					continue;
+				}
+
+				// twitch via api
+				if (!empty($twitch_client_id) && preg_match('#https?://(?:www\.)?twitch\.tv/(\w+)(/\w+)?#', $u, $m)) {
+					// get token, don't revalidate because won't be revoked - https://dev.twitch.tv/docs/authentication
+					echo "Getting Twitch token.. ";
+					if (empty($twitch_token) || $twitch_token_expires < time()) {
+						$r = json_decode(curlget([CURLOPT_URL => "https://id.twitch.tv/oauth2/token?client_id=$twitch_client_id=&client_secret=$twitch_client_secret&grant_type=client_credentials", CURLOPT_POST => 1, CURLOPT_HTTPHEADER => ["Client-ID: $twitch_client_id"]]));
+						if (!empty($r) && !empty($r->access_token)) {
+							echo "ok.\n";
+							$twitch_token = $r->access_token;
+							$twitch_token_expires = time() + $r->expires_in - 30;
+						} else {
+							if (isset($r->message)) echo "error: $r->message\n"; else echo "error, r=" . print_r($r, true);
+							$t = '[ API error ]';
+							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+							$twitch_token = '';
+							$twitch_token_expires = 0;
+							continue;
+						}
+					} else echo "ok.\n";
+					if (!empty($twitch_token)) {
+						// get user info - https://dev.twitch.tv/docs/api/reference#get-users
+						echo "Getting user info for \"$m[1]\".. ";
+						$r = json_decode(curlget([CURLOPT_URL => "https://api.twitch.tv/helix/users?login=$m[1]", CURLOPT_HTTPHEADER => ["Client-ID: $twitch_client_id", "Authorization: Bearer $twitch_token"]]));
+						if (!empty($r) && isset($r->data)) {
+							if (isset($r->data[0])) {
+								echo "ok.\n";
+								$un = $r->data[0]->display_name;
+								$ud = $r->data[0]->description; // shorten
+								if (!empty($m[2])) {
+									// just show subdir
+									$t = "[ $un: " . ucfirst(substr($m[2], 1)) . " ]";
+									send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+									continue;
 								} else {
-									echo "not found, abort\n";
+									// get live stream info - https://dev.twitch.tv/docs/api/reference#get-streams-metadata
+									echo "Getting live stream info.. ";
+									$r = json_decode(curlget([CURLOPT_URL => "https://api.twitch.tv/helix/streams?user_login=$m[1]", CURLOPT_HTTPHEADER => ["Client-ID: $twitch_client_id", "Authorization: Bearer $twitch_token"]]));
+									if (!empty($r) && isset($r->data)) {
+										if (count($r->data) > 0) {
+											// check for live stream
+											foreach ($r->data as $d) if ($d->type == 'live') {
+												echo "ok.\n";
+												$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $d->title);
+												$t = trim(preg_replace('/\s+/', ' ', $t));
+												$t = str_shorten($t, 424);
+												$t = "[ $t ]";
+												send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+												continue(2);
+											}
+										}
+										// no streams, show user info
+										echo "not streaming\n";
+										$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', "$un: $ud");
+										$t = trim(preg_replace('/\s+/', ' ', $t));
+										$t = str_shorten($t, 424);
+										$t = "[ $t ]";
+										send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+										continue;
+									} else {
+										if (isset($r->message)) echo "error: $r->message\n"; else echo "error, r=" . print_r($r, true);
+									}
 								}
 							} else {
-								// api or connection error, shouldnt usually happen, continue silently
-								if (isset($r->message)) echo "error: $r->message\n"; else echo "error, r=" . print_r($r, true);
-								continue(2);
+								echo "not found, abort\n";
 							}
+						} else {
+							// api or connection error, shouldnt usually happen, continue silently
+							if (isset($r->message)) echo "error: $r->message\n"; else echo "error, r=" . print_r($r, true);
+							continue;
 						}
 					}
+				}
 
-					// gab social
-					if (preg_match('#https://(?:www\.)?gab\.com/[^/]+/posts/(\d+)#', $u)) {
-						$gab_post = true;
-						$use_meta_tag = 'og:description';
-					} else $gab_post = false;
+				// gab social
+				if (preg_match('#https://(?:www\.)?gab\.com/[^/]+/posts/(\d+)#', $u)) {
+					$gab_post = true;
+					$use_meta_tag = 'og:description';
+				} else $gab_post = false;
 
-					// telegram (todo: use api to get message details i.e. whether has a video or image)
-					if (preg_match("#^https?://t\.me/#", $u, $m)) {
-						$use_meta_tag = 'og:description';
-						$meta_skip_blank = true;
+				// telegram (todo: use api to get message details i.e. whether has a video or image)
+				if (preg_match("#^https?://t\.me/#", $u, $m)) {
+					$use_meta_tag = 'og:description';
+					$meta_skip_blank = true;
+				}
+
+				// poa.st
+				if (preg_match("#^https?://poa\.st/@[^/]+/posts/#", $u) || preg_match("#^https?://poa\.st/notice/#", $u)) {
+					$use_meta_tag = 'og:description';
+					$meta_skip_blank = true;
+				}
+
+				// msn.com articles - title via ajax
+				if (preg_match("#^(?:www\.)?msn\.com/.*?/ar-([^/]*)$#", $parse_url['host'] . $parse_url['path'], $m)) {
+					$r = json_decode(curlget([CURLOPT_URL => "https://assets.msn.com/content/view/v2/Detail/en-us/$m[1]"]));
+					if (isset($r->title)) {
+						$t = "[ " . str_shorten($r->title, 424) . " ]";
+						send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+						if ($title_cache_enabled) add_to_title_cache($u, $t);
+						continue;
 					}
+				}
 
-					// poa.st
-					if (preg_match("#^https?://poa\.st/@[^/]+/posts/#", $u) || preg_match("#^https?://poa\.st/notice/#", $u)) {
-						$use_meta_tag = 'og:description';
-						$meta_skip_blank = true;
+				// militarywatchmagazine.com articles - title via ajax
+				if (preg_match("#^https?://(?:www\.)?militarywatchmagazine\.com/article/([^?\#]*)#", $u, $m)) {
+					$r = json_decode(curlget([CURLOPT_URL => "https://militarywatchmagazine.com/i_s/api/records/articles?filter=article_identifier,eq,$m[1]"]));
+					if (isset($r->records[0]->article_title)) {
+						$t = "[ " . str_shorten($r->records[0]->article_title, 424) . " ]";
+						send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+						if ($title_cache_enabled) add_to_title_cache($u, $t);
+						continue;
 					}
+				}
 
-					// msn.com articles - title via ajax
-					if (preg_match("#^(?:www\.)?msn\.com/.*?/ar-([^/]*)$#", $parse_url['host'] . $parse_url['path'], $m)) {
-						$r = json_decode(curlget([CURLOPT_URL => "https://assets.msn.com/content/view/v2/Detail/en-us/$m[1]"]));
-						if (isset($r->title)) {
-							$t = "[ " . str_shorten($r->title, 424) . " ]";
-							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-							if ($title_cache_enabled) add_to_title_cache($u, $t);
-							continue(2);
-						}
+				$og_title_urls_regex = ['#https?://(?:www\.)?brighteon\.com#', '#https?://(?:www\.)?campusreform\.org#',];
+				foreach ($og_title_urls_regex as $r) if (preg_match($r, $u)) $use_meta_tag = 'og:title';
+
+				// ai media summaries
+				$ai_image_title_done = false;
+				if (!empty($ai_media_titles_enabled) && preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png|webp|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#i", $u)) {
+					echo "Using AI to summarize\n";
+					$t = get_ai_media_title($u);
+					if (!empty($t)) {
+						$t = str_shorten($t);
+						$t = "[ $t ]";
+						send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+						if ($title_cache_enabled) add_to_title_cache($u, $t);
+						continue;
 					}
+					$ai_image_title_done = true;
+				}
 
-					// militarywatchmagazine.com articles - title via ajax
-					if (preg_match("#^https?://(?:www\.)?militarywatchmagazine\.com/article/([^?\#]*)#", $u, $m)) {
-						$r = json_decode(curlget([CURLOPT_URL => "https://militarywatchmagazine.com/i_s/api/records/articles?filter=article_identifier,eq,$m[1]"]));
-						if (isset($r->records[0]->article_title)) {
-							$t = "[ " . str_shorten($r->records[0]->article_title, 424) . " ]";
-							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-							if ($title_cache_enabled) add_to_title_cache($u, $t);
-							continue(2);
-						}
+				// skips
+				$pathinfo = pathinfo($u);
+				if (in_array($pathinfo['extension'], ['gif', 'gifv', 'mp4', 'webm', 'jpg', 'jpeg', 'png', 'csv', 'pdf', 'xls', 'doc', 'txt', 'xml', 'json', 'zip', 'gz', 'bz2', '7z', 'jar'])) {
+					echo "skipping url due to extension \"{$pathinfo['extension']}\"\n";
+					continue;
+				}
+
+				if (!isset($header)) $header = [];
+
+				if (!empty($tor_enabled) && (preg_match('#^https?://.*?\.onion(?:$|/)#', $u) || !empty($tor_all))) {
+					echo "getting url title via tor\n";
+					/** @noinspection HttpUrlsUsage */
+					$html = curlget([CURLOPT_URL => $u, CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME, CURLOPT_PROXY => "$tor_host:$tor_port", CURLOPT_CONNECTTIMEOUT => 60, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => $header]);
+					if (empty($html)) {
+						if (strpos($curl_error, "Failed to connect to $tor_host port $tor_port") !== false) send("PRIVMSG $channel :Tor error - is it running?\n"); elseif (strpos($curl_error, "Connection timed out after") !== false) send("PRIVMSG $channel :Tor connection timed out\n");
+						// else send("PRIVMSG $channel :Tor error or site down\n");
+						continue;
 					}
-
-					$og_title_urls_regex = ['#https?://(?:www\.)?brighteon\.com#', '#https?://(?:www\.)?campusreform\.org#',];
-					foreach ($og_title_urls_regex as $r) if (preg_match($r, $u)) $use_meta_tag = 'og:title';
-
-					// ai media summaries
-					$ai_image_title_done = false;
-					if (!empty($ai_media_titles_enabled) && preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png|webp|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#i", $u)) {
+				} else {
+					if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1]);
+					else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
+				}
+				// echo "response[2048/".strlen($html)."]=".print_r(substr($html,0,2048),true)."\n";
+				if (empty($html)) {
+					if (strpos($curl_error, 'SSL certificate problem') !== false) {
+						echo "set \$allow_invalid_certs=true; in settings to skip certificate checking\n";
+						$t = '[ SSL certificate problem ]';
+						send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+						continue;
+					}
+					echo "Error: response blank\n";
+					continue;
+				}
+				// check if it's an image for ai
+				if ($ai_media_titles_enabled && !$ai_image_title_done) {
+					$finfo = new finfo(FILEINFO_MIME);
+					$mime = explode(';', $finfo->buffer($html))[0];
+					if (preg_match("#(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
 						echo "Using AI to summarize\n";
-						$t = get_ai_media_title($u);
+						$t = get_ai_media_title($u, $html, $mime);
 						if (!empty($t)) {
 							$t = str_shorten($t);
 							$t = "[ $t ]";
 							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 							if ($title_cache_enabled) add_to_title_cache($u, $t);
-							continue(2);
+							continue;
 						}
-						$ai_image_title_done = true;
+					}
+				}
+				// default
+				$title = '';
+				$html = str_replace('<<', '&lt;&lt;', $html); // rottentomatoes bad title html
+				$dom = new DOMDocument();
+				if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
+					if ($use_meta_tag) {
+						$list = $dom->getElementsByTagName("meta");
+						foreach ($list as $l) if (((!empty($l->attributes->getNamedItem('name')) && $l->attributes->getNamedItem('name')->value == $use_meta_tag) || (!empty($l->attributes->getNamedItem('property')) && $l->attributes->getNamedItem('property')->value == $use_meta_tag)) && !empty($l->attributes->getNamedItem('content')->value)) $title = $l->attributes->getNamedItem('content')->value;
+						if ($gab_post) $title = rtrim(preg_replace('/' . preg_quote(": '", '/') . '/', ': ', $title, 1), "'");
+						if (empty($title) && $meta_skip_blank) continue;
+					}
+					if (empty($title)) {
+						$list = $dom->getElementsByTagName("title");
+						if ($list->length > 0) $title = $list->item(0)->textContent;
 					}
 
-					// skips
-					$pathinfo = pathinfo($u);
-					if (in_array($pathinfo['extension'], ['gif', 'gifv', 'mp4', 'webm', 'jpg', 'jpeg', 'png', 'csv', 'pdf', 'xls', 'doc', 'txt', 'xml', 'json', 'zip', 'gz', 'bz2', '7z', 'jar'])) {
-						echo "skipping url due to extension \"{$pathinfo['extension']}\"\n";
-						continue(2);
-					}
-
-					if (!isset($header)) $header = [];
-
-					if (!empty($tor_enabled) && (preg_match('#^https?://.*?\.onion(?:$|/)#', $u) || !empty($tor_all))) {
-						echo "getting url title via tor\n";
-						/** @noinspection HttpUrlsUsage */
-						$html = curlget([CURLOPT_URL => $u, CURLOPT_PROXYTYPE => CURLPROXY_SOCKS5_HOSTNAME, CURLOPT_PROXY => "$tor_host:$tor_port", CURLOPT_CONNECTTIMEOUT => 60, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => $header]);
-						if (empty($html)) {
-							if (strpos($curl_error, "Failed to connect to $tor_host port $tor_port") !== false) send("PRIVMSG $channel :Tor error - is it running?\n"); elseif (strpos($curl_error, "Connection timed out after") !== false) send("PRIVMSG $channel :Tor connection timed out\n");
-							// else send("PRIVMSG $channel :Tor error or site down\n");
-							continue(2);
-						}
-					} else {
-						if (!empty($scrapingbee_enabled)) $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1]);
-						else $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
-					}
-					// echo "response[2048/".strlen($html)."]=".print_r(substr($html,0,2048),true)."\n";
-					if (empty($html)) {
-						if (strpos($curl_error, 'SSL certificate problem') !== false) {
-							echo "set \$allow_invalid_certs=true; in settings to skip certificate checking\n";
-							$t = '[ SSL certificate problem ]';
-							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-							continue(2);
-						}
-						echo "Error: response blank\n";
-						continue(2);
-					}
-					// check if it's an image for ai
-					if ($ai_media_titles_enabled && !$ai_image_title_done) {
-						$finfo = new finfo(FILEINFO_MIME);
-						$mime = explode(';', $finfo->buffer($html))[0];
-						if (preg_match("#(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
-							echo "Using AI to summarize\n";
-							$t = get_ai_media_title($u, $html, $mime);
-							if (!empty($t)) {
-								$t = str_shorten($t);
-								$t = "[ $t ]";
-								send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-								if ($title_cache_enabled) add_to_title_cache($u, $t);
-								continue(2);
-							}
-						}
-					}
-					// default
-					$title = '';
-					$html = str_replace('<<', '&lt;&lt;', $html); // rottentomatoes bad title html
-					$dom = new DOMDocument();
-					if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
-						if ($use_meta_tag) {
-							$list = $dom->getElementsByTagName("meta");
-							foreach ($list as $l) if (((!empty($l->attributes->getNamedItem('name')) && $l->attributes->getNamedItem('name')->value == $use_meta_tag) || (!empty($l->attributes->getNamedItem('property')) && $l->attributes->getNamedItem('property')->value == $use_meta_tag)) && !empty($l->attributes->getNamedItem('content')->value)) $title = $l->attributes->getNamedItem('content')->value;
-							if ($gab_post) $title = rtrim(preg_replace('/' . preg_quote(": '", '/') . '/', ': ', $title, 1), "'");
-							if (empty($title) && $meta_skip_blank) continue(2);
-						}
-						if (empty($title)) {
-							$list = $dom->getElementsByTagName("title");
-							if ($list->length > 0) $title = $list->item(0)->textContent;
-						}
-
-						// auto translate title
-						if (!empty($auto_translate_titles) && !empty($gcloud_translate_keyfile) && !empty($title)) {
-							$h = $dom->getElementsByTagName('html')[0];
-							if (!empty($h) && !empty($h->attributes->getNamedItem('lang'))) {
-								$lc = strtolower(explode('-', $h->attributes->getNamedItem('lang')->value)[0]);
-								if ($lc <> 'en' && get_lang($lc) <> 'Unknown') {
-									$r = google_translate(['text' => $title, 'from_lang' => $lc, 'to_lang' => 'en']);
-									if (!empty($r->text) && !isset($r->error)) {
-										$l = make_short_url("https://translate.google.com/translate?js=n&sl=$lc&tl=en&u=" . urlencode($u));
-										$title = '(' . get_lang($lc) . ") $r->text (→EN: $l)";
-									}
+					// auto translate title
+					if (!empty($auto_translate_titles) && !empty($gcloud_translate_keyfile) && !empty($title)) {
+						$h = $dom->getElementsByTagName('html')[0];
+						if (!empty($h) && !empty($h->attributes->getNamedItem('lang'))) {
+							$lc = strtolower(explode('-', $h->attributes->getNamedItem('lang')->value)[0]);
+							if ($lc <> 'en' && get_lang($lc) <> 'Unknown') {
+								$r = google_translate(['text' => $title, 'from_lang' => $lc, 'to_lang' => 'en']);
+								if (!empty($r->text) && !isset($r->error)) {
+									$l = make_short_url("https://translate.google.com/translate?js=n&sl=$lc&tl=en&u=" . urlencode($u));
+									$title = '(' . get_lang($lc) . ") $r->text (→EN: $l)";
 								}
 							}
 						}
 					}
-					$orig_title = $title;
-					// if potential invidious mirror rewrite URL and jump back to yt/invidious. if not an api URL will continue past here and parse already-fetched html. yewtu.be has a captcha so handle manually
-					if (!empty($youtube_api_key) && (preg_match('/ - Invidious$/', $title) || preg_match('#^https://yewtu.be/#', $u)) && empty($invidious_mirror) && !preg_match('#^https://invidio\.us#', $u)) {
-						$u = preg_replace('#^https?://.*?/(.*)#', 'https://invidio.us/$1', $u);
-						$invidious_mirror = true;
-						goto invidious;
-					}
-					invidious_continue:
-					// echo "orig title= ".print_r($title,true)."\n";
-					$title = html_entity_decode($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-					// strip numeric entities that don't seem to display right on IRC when converted
-					$title = preg_replace('/(&#[0-9]+;)/', '', $title);
-					$title = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $title);
-					$title = preg_replace('/\s+/', ' ', $title);
-					$tmp = " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"; // unicode spaces, ltr, rtl
-					$title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
-					$notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*'];
-					foreach ($notitletitles as $ntt) {
-						if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
-							echo "Skipping output of title: $title\n";
-							continue(3);
-						}
-					}
-					if ($title == get_base_domain($parse_url['host'])) {
+				}
+				$orig_title = $title;
+				// if potential invidious mirror rewrite URL and jump back to yt/invidious. if not an api URL will continue past here and parse already-fetched html. yewtu.be has a captcha so handle manually
+				if (!empty($youtube_api_key) && (preg_match('/ - Invidious$/', $title) || preg_match('#^https://yewtu.be/#', $u)) && empty($invidious_mirror) && !preg_match('#^https://invidio\.us#', $u)) {
+					$u = preg_replace('#^https?://.*?/(.*)#', 'https://invidio.us/$1', $u);
+					$invidious_mirror = true;
+					goto invidious;
+				}
+				invidious_continue:
+				// echo "orig title= ".print_r($title,true)."\n";
+				$title = html_entity_decode($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+				// strip numeric entities that don't seem to display right on IRC when converted
+				$title = preg_replace('/(&#[0-9]+;)/', '', $title);
+				$title = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $title);
+				$title = preg_replace('/\s+/', ' ', $title);
+				$tmp = " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"; // unicode spaces, ltr, rtl
+				$title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
+				$notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*'];
+				foreach ($notitletitles as $ntt) {
+					if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
 						echo "Skipping output of title: $title\n";
-						continue(3);
+						continue(2);
 					}
-					foreach ($title_replaces as $k => $v) $title = str_replace($k, $v, $title);
-					// if(!$title) $title='No title found.';
-					if (strpos($u, '//twitter.com/') !== false) $title = str_replace_one(' on Twitter: "', ': "', $title);
-					if ($title && $outline) {
-						preg_match('#<span class="publication">.*?>(.*)›.*?</span>#', $html, $m);
-						if (!empty($m[1])) $title .= ' - ' . trim($m[1]);
-					}
-					$title = str_shorten($title, 438);
-					if ($title) {
-						$title = "[ $title ]";
-						send("PRIVMSG $channel :$title_bold$title$title_bold\n");
-						if ($title_cache_enabled) add_to_title_cache($u, $title);
-						break;
-					} else {
-						if (strpos($u, '//twitter.com/') !== false) { // retry twitter
-							$u_tries++;
-							if ($u_tries == 3) {
-								echo "No title found.\n";
-								break;
-							} else {
-								echo "No title found, retrying..\n";
-								sleep(1);
-							}
-						} else break;
-					}
+				}
+				if ($title == get_base_domain($parse_url['host'])) {
+					echo "Skipping output of title: $title\n";
+					continue;
+				}
+				foreach ($title_replaces as $k => $v) $title = str_replace($k, $v, $title);
+				if (strpos($u, '//x.com/') !== false) $title = str_replace_one(' on X: "', ': "', $title);
+				if ($title && $outline) {
+					preg_match('#<span class="publication">.*?>(.*)›.*?</span>#', $html, $m);
+					if (!empty($m[1])) $title .= ' - ' . trim($m[1]);
+				}
+				$title = str_shorten($title, 438);
+				if ($title) {
+					$title = "[ $title ]";
+					send("PRIVMSG $channel :$title_bold$title$title_bold\n");
+					if ($title_cache_enabled) add_to_title_cache($u, $title);
+				} else {
+					if (preg_match('#^https://x.com/#', $u)) { // retry non-api X
+						if ($u_tries < 2) {
+							echo "No title found, retrying..\n";
+							sleep(1);
+							$ui--;
+						} else echo "No title found.\n";
+					} else echo "No title found.\n";
 				}
 			}
 		}
@@ -2892,7 +2890,6 @@ function nitter_hosts_update()
 			$nitter_hosts_time += 900;
 		}
 	} else {
-		// echo "Updated nitter hosts from cache at $run_dir/nitter-hosts.dat\n";
 		$nitter_hosts = $chosts;
 		$nitter_hosts_time = $time;
 	}
