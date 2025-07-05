@@ -18,11 +18,11 @@ $llm_config = [
 			"key" => "", // https://console.x.ai/
 			"model" => "grok-3-mini", // https://docs.x.ai/docs/models
 			"vision_model" => "grok-2-vision",
-			"search_enabled" => false, // may not work with mini model. see https://docs.x.ai/docs/guides/live-search
-			"search_max_results" => 15, // 1-30
-			"search_mode" => "auto", // off, auto, on
-			"search_sources" => ["web", "x"], // web, x, news
-			"search_safe" => false, // only safe results
+			"grok_search_enabled" => false, // https://docs.x.ai/docs/guides/live-search. $25 USD per 1K searches in July 2025
+			"grok_search_max_results" => 15, // 1-30
+			"grok_search_mode" => "auto", // off, auto, on
+			"grok_search_sources" => ["web", "x", "news"], // web, x, news
+			"grok_search_safe" => false, // only safe results
 		],
 //		[
 //			"name" => "Gemini", // note: "Gemini" (case-sensitive) set here is used to determine whether to only send data uris, and not urls, to the vision model. note llm-gemini.php plugin uses the native endpoint and has more features
@@ -188,6 +188,7 @@ function llm_query()
 		foreach ($llm_config["memory_items"][$service["name"]] as $mi) {
 			$mi2 = clone $mi;
 			unset($mi2->time);
+			unset($mi2->grok_citations);
 			$data->messages[] = $mi2;
 		}
 	}
@@ -207,14 +208,14 @@ function llm_query()
 	else $data->model = $service["model"];
 	$data->stream = false;
 	$data->temperature = 0;
-	if (!empty($service["search_enabled"])) { // grok live search
+	if (!empty($service["grok_search_enabled"])) {
 		$s = new stdClass();
-		$s->max_search_results = $service["search_max_results"];
-		$s->mode = $service["search_mode"];
-		foreach ($service["search_sources"] as $src) {
+		$s->max_search_results = $service["grok_search_max_results"];
+		$s->mode = $service["grok_search_mode"];
+		foreach ($service["grok_search_sources"] as $src) {
 			$t = new stdClass();
 			$t->type = $src;
-			$t->safe_search = $service["search_safe"];
+			$t->safe_search = $service["grok_search_safe"];
 			$s->sources[] = $t;
 		}
 		$data->search_parameters = $s;
@@ -242,6 +243,7 @@ function llm_query()
 		return send("PRIVMSG $target :" . $service["name"] . " API error\n");
 	}
 	$content = $r->choices[0]->message->content;
+	if (!empty($service["grok_search_enabled"])) $grok_citations = $r->citations ?? [];
 
 	// append current request and response to memory
 	if ($llm_config["memory_enabled"]) {
@@ -262,6 +264,7 @@ function llm_query()
 		$c->text = $content;
 		$msg_obj->content[] = $c;
 		$msg_obj->time = $time;
+		if (!empty($service["grok_search_enabled"])) $msg_obj->grok_citations = $grok_citations;
 		$llm_config["memory_items"][$service["name"]][] = $msg_obj;
 	}
 
@@ -328,8 +331,15 @@ function llm_query()
 		// prepare file for upload
 		if ($llm_config["memory_enabled"]) {
 			$results = [];
-			foreach ($llm_config["memory_items"][$service["name"]] as $mi) $results[] = [$mi->role == "user" ? "u" : "a", $mi->content[0]->type == "text" ? "t" : "?", $mi->content[0]->text];
-		} else $results = [["u", "t", $args], ["a", "t", $content]];
+			foreach ($llm_config["memory_items"][$service["name"]] as $mi) {
+				$o = (object)["role" => $mi->role == "user" ? "u" : "a", "text" => $mi->content[0]->text];
+				if (isset($mi->grok_citations)) $o->sources = $mi->grok_citations;
+				$results[] = $o;
+			}
+		} else {
+			$results = [(object)["role" => "u", "text" => $args], (object)["role" => "a", "text" => $content]];
+			if (isset($grok_citations)) $results[1]->sources = $grok_citations;
+		}
 		$file_data = new stdClass();
 		$file_data->s = $service["name"];
 		$file_data->m = $service["model"];
@@ -425,7 +435,8 @@ if ($llm_config["github_link_titles"]) {
 				echo "[llm_link_titles] Error parsing GitHub response for $u\n";
 				continue;
 			}
-			$t = "[ " . str_shorten($r->r[count($r->r) - 2][2], 438) . " ]";
+			$t = $r->r[count($r->r) - 2]->text ?? $r->r[count($r->r) - 2][2]; // [2] deprecated
+			$t = "[ " . str_shorten($t, 438) . " ]";
 			send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 			if ($title_cache_enabled) add_to_title_cache($u, $t);
 		}

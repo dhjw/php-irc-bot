@@ -291,8 +291,9 @@ function gem_query()
 		// prepare file for upload
 		if ($gem_config["memory_enabled"]) {
 			$results = [];
-			foreach ($gem_config["memory_items"] as $mi) $results[] = [$mi->role == "user" ? "u" : "a", isset($mi->parts[0]->text) ? "t" : "?", $mi->parts[0]->text];
-		} else $results = [["u", "t", $args], ["a", "t", $response]];
+			foreach ($gem_config["memory_items"] as $mi) $results[] = (object)["role" => $mi->role == "user" ? "u" : "a", "text" => $mi->parts[0]->text];
+		} else $results = [(object)["role" => "u", "text" => $args], (object)["role" => "a", "text" => $response]];
+
 		$file_data = new stdClass();
 		$file_data->s = "Gemini";
 		$file_data->m = $gem_config["model"];
@@ -388,7 +389,8 @@ if ($gem_config["github_link_titles"]) {
 				echo "[gem_link_titles] Error parsing GitHub response for $u\n";
 				continue;
 			}
-			$t = "[ " . str_shorten($r->r[count($r->r) - 2][2], 438) . " ]";
+			$t = $r->r[count($r->r) - 2]->text ?? $r->r[count($r->r) - 2][2]; // [2] deprecated
+			$t = "[ " . str_shorten($t, 438) . " ]";
 			send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 			if ($title_cache_enabled) add_to_title_cache($u, $t);
 		}
