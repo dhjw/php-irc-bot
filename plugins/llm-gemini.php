@@ -26,7 +26,7 @@ $gem_config = [
 	"github_user" => "llm10",
 	"github_committer_name" => "llmbot", // doesn't have to be a real user
 	"github_committer_email" => "llmbot@example.com", // doesn't have to be a real email
-	"github_min_lines" => 11, // set to 1 to upload all results and only output links to irc
+	"github_min_lines" => 6, // set to 1 to upload all results and only output links to irc
 	"github_nick_before_link" => false,
 	"github_link_titles" => true, // output titles for result page links if reposted by a user later (must be handled by this plugin as <title> is empty on initial page load)
 	"line_delay" => 1000000, // microseconds
@@ -158,6 +158,7 @@ function gem_query()
 		foreach ($gem_config["memory_items"] as $mi) {
 			$mi2 = clone $mi;
 			unset($mi2->time);
+			unset($mi2->sources);
 			$data->contents[] = $mi2;
 		}
 	}
@@ -206,7 +207,20 @@ function gem_query()
 	if (isset($r->error->message)) return send("PRIVMSG $target :API error: {$r->error->message}\n");
 	if (!isset($r->candidates) || empty($r->candidates)) return send("PRIVMSG $target :API error\n");
 	$response = "";
-	foreach ($r->candidates as $candidate) foreach ($candidate->content->parts as $p) $response .= $p->text;
+	$sources = [];
+	foreach ($r->candidates as $candidate) {
+		foreach ($candidate->content->parts as $p) $response .= $p->text;
+		if (isset($candidate->groundingMetadata->groundingChunks)) foreach ($candidate->groundingMetadata->groundingChunks as $gc) if (isset($gc->web->uri)) $sources[] = get_final_url($gc->web->uri);
+		if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
+			preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
+			foreach ($m[1] as $url) $sources[] = get_final_url($url);
+		}
+	}
+	$sources = array_unique($sources);
+	// remove inline citations that dont really match up with provided data
+	$response = preg_replace('/ \[\d+(?:, \d+)*? - .*?\]/', '', $response);
+	$response = preg_replace('/ \[.*?(?:\d+ ,)*? \d+\]/', '', $response);
+	$response = preg_replace('/ \[\d+\.\d+(?:, \d+\.\d+)*?\]/', '', $response);
 
 	// append current request and response to memory
 	if ($gem_config["memory_enabled"]) {
@@ -225,6 +239,7 @@ function gem_query()
 		$p_obj->text = $response;
 		$c_obj->parts[] = $p_obj;
 		$c_obj->time = $time;
+		if (!empty($sources)) $c_obj->sources = $sources;
 		$gem_config["memory_items"][] = $c_obj;
 	}
 
@@ -291,8 +306,16 @@ function gem_query()
 		// prepare file for upload
 		if ($gem_config["memory_enabled"]) {
 			$results = [];
-			foreach ($gem_config["memory_items"] as $mi) $results[] = [$mi->role == "user" ? "u" : "a", isset($mi->parts[0]->text) ? "t" : "?", $mi->parts[0]->text];
-		} else $results = [["u", "t", $args], ["a", "t", $response]];
+			foreach ($gem_config["memory_items"] as $mi) {
+				$o = (object)["role" => $mi->role == "user" ? "u" : "a", "text" => $mi->parts[0]->text];
+				if (isset($mi->sources)) $o->sources = $mi->sources;
+				$results[] = $o;
+			}
+		} else {
+			$results = [(object)["role" => "u", "text" => $args], (object)["role" => "a", "text" => $response]];
+			if (!empty($sources)) $results[1]->sources = $sources;
+		}
+
 		$file_data = new stdClass();
 		$file_data->s = "Gemini";
 		$file_data->m = $gem_config["model"];
@@ -388,7 +411,8 @@ if ($gem_config["github_link_titles"]) {
 				echo "[gem_link_titles] Error parsing GitHub response for $u\n";
 				continue;
 			}
-			$t = "[ " . str_shorten($r->r[count($r->r) - 2][2], 438) . " ]";
+			$t = $r->r[count($r->r) - 2]->text ?? $r->r[count($r->r) - 2][2]; // [2] deprecated
+			$t = "[ " . str_shorten($t, 438) . " ]";
 			send("PRIVMSG $channel :$title_bold$t$title_bold\n");
 			if ($title_cache_enabled) add_to_title_cache($u, $t);
 		}
