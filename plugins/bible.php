@@ -63,9 +63,9 @@ function bible()
 		$text .= (count($verses) > 1 ? ($k > 0 ? ' ' : '') . "$verse " : '') . trim($r->data->content);
 	}
 	while (1) {
-		$s = trim(str_shorten($text, 999, ['nodots' => true])); // max length
-		send("PRIVMSG $target :$s\n");
-		if ($s == trim($text)) break;
+		$s = str_shorten($text, 999, ['nodots' => true]); // max length
+		send("PRIVMSG $target :" . trim($s) . "\n");
+		if ($s == $text) break;
 		$text = substr($text, strlen($s));
 	}
 }
