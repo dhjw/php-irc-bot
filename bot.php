@@ -1095,6 +1095,20 @@ while (1) {
 				}
 				if ($invidious_mirror) goto invidious_continue; // mirror didnt hit api
 
+				// odysee
+				if (preg_match("#^https?://odysee\.com/@#", $u)) {
+					$html = curlget([CURLOPT_URL => $u]);
+					if (preg_match('#<script type="application/ld\+json">(.*?)</script>#s', $html, $m)) {
+						$j = json_decode($m[1]);
+						if ($j->{'@type'} ?? false == 'VideoObject' && isset($j->name) && isset($j->duration)) {
+							$t = "[ $j->name - " . covtime($j->duration) . ' ]';
+							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+							if ($title_cache_enabled) add_to_title_cache($u, $t);
+							continue;
+						}
+					}
+				}
+
 				// wikipedia
 				// todo: extracts on subdomains other than en.wikipedia.org, auto-translate?
 				if (preg_match("#^(?:https?://(?:[^/]*?\.)?wiki[pm]edia\.org/wiki/(.*)|https?://upload\.wikimedia\.org)#", $u, $m)) {
