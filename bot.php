@@ -1637,7 +1637,7 @@ while (1) {
 						$f = new DomXPath($dom);
 						$n = $f->query("/html/head/link[starts-with(@href,'at://')]");
 						if (!empty($n) && $n->length > 0) {
-							$at = $n->item(0)->getAttribute('href');
+							$at = $n[0]->getAttribute('href');
 							// echo "found bluesky at-uri $at\n";
 							$r = @json_decode(curlget([CURLOPT_URL => "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=$at"]));
 							if (!empty($r)) {
@@ -1769,53 +1769,6 @@ while (1) {
 				# Facebook
 				if (preg_match('#^https?://(?:www\.)?facebook\.com/reel/(\d+)#', $u, $m)) $use_meta_tag = 'description';
 				if (preg_match('#^https?://(?:www\.)?facebook\.com/photo/#', $u, $m)) $use_meta_tag = 'description';
-
-				// parler posts
-				if (preg_match('#^https?://(?:share\.par\.pw/post/|parler\.com/post-view\?q=)(\w*)#', $u, $m)) {
-					$html = curlget([CURLOPT_URL => "https://share.par.pw/post/$m[1]"]);
-					$dom = new DOMDocument();
-					if ($dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
-						$x = new DOMXPath($dom);
-						list($n) = $x->query('//*[@id="ud--name"]');
-						$a = $n->textContent;
-						list($n) = $x->query('//*[@id="post--content"]/p');
-						$b = $n->textContent;
-						if (!empty($a) && !empty($b)) {
-							$t = strip_tags(html_entity_decode("$a: $b", ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-							$t = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $t);
-							$t = trim(preg_replace('/\s+/', ' ', $t));
-							$t = str_shorten($t, 424, ['less' => 13]);
-							// seems to randomly show post image or require login, require login for all links, randomly show author avatar if no image, may not display link/media even if it exists, and cant tell between links or media..  which is dumb. so we'll just add (link/media) when its clear there's a link or media and skip avatar images
-							list($n) = $x->query('//*[@id="media-placeholder--wrapper"]');
-							$c = $n->textContent;
-							if (!empty($c)) {
-								if (strpos($c, 'you must be logged in') !== false) $t .= ' (link/media)'; // $t.=' (media-login)';
-								else {
-									list($n) = $x->query('//*[@id="ud--avatar"]/img/@src');
-									$ai = $n->textContent;
-									list($n) = $x->query('//*[@id="media--placeholder"]/@src');
-									$pi = $n->textContent;
-									if ($pi <> $ai) $t .= ' (link/media)'; // not avatar of author
-								}
-							}
-							$t = '[ ' . trim($t) . ' ]';
-							send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-							if ($title_cache_enabled) add_to_title_cache($u, $t);
-						} else {
-							send("PRIVMSG $channel :[ Post not found ]\n");
-							if ($title_cache_enabled) add_to_title_cache($u, "[ Post not found ]");
-						}
-						continue;
-					} else echo "Error parsing Parler HTML\n";
-				}
-
-				// parler profile
-				if (preg_match('#^https?://parler\.com/profile/(\w*)/(\w*)#', $u, $m)) {
-					$t = "[ @$m[1] - " . ucfirst($m[2]) . " ]";
-					send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-					if ($title_cache_enabled) add_to_title_cache($u, $t);
-					continue;
-				}
 
 				// twitch via api
 				if (!empty($twitch_client_id) && preg_match('#https?://(?:www\.)?twitch\.tv/(\w+)(/\w+)?#', $u, $m)) {
@@ -2044,7 +1997,7 @@ while (1) {
 				$title = preg_replace('/\s+/', ' ', $title);
 				$tmp = " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"; // unicode spaces, ltr, rtl
 				$title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
-				$notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*'];
+				$notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*', 'Captcha Page'];
 				foreach ($notitletitles as $ntt) {
 					if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
 						echo "Skipping output of title: $title\n";
@@ -2827,14 +2780,13 @@ function str_replace_one($needle, $replace, $haystack)
 function str_shorten($s, $len = 999, $opts = [])
 {
 	global $baselen;
-	if (!isset($opts['less'])) $opts['less'] = 0;
 	$e = false;
 	if (mb_strlen($s) > $len) { // desired max chars
 		$s = mb_substr($s, 0, $len);
 		if (!$opts['nowordcut']) $s = mb_substr($s, 0, mb_strrpos($s, ' ') + 1); // cut to last word
 		$e = true;
 	}
-	$m = 502 - $baselen - $opts['less']; // max 512 - 4(ellipses) - 4(brackets) - 2(bold) - baselen bytes; todo: fix for non-full-width strings using 'less' for extra data, remove auto bracket calc and use 'less' on all calls
+	$m = 502 - $baselen; // max 512 - 4(ellipses) - 4(brackets) - 2(bold) - baselen bytes
 	if ($opts['nodots']) $m += 4;
 	if ($opts['nobrackets']) $m += 4;
 	if ($opts['nobold']) $m += 2;
