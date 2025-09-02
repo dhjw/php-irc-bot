@@ -3134,16 +3134,23 @@ function get_base_domain($d)
 
 function dorestart($msg, $sendquit = true)
 {
-    global $_;
     echo "Restarting...\n";
-    $_ = $_SERVER['_'];
-    register_shutdown_function(function () {
+    if (strncasecmp(PHP_OS, 'WIN', 3) == 0) { // windows
+
+        $cmd = 'cmd /C start "" /B "php" ' . escapeshellarg($_SERVER['PHP_SELF']) . ' ' . implode(' ', array_map('escapeshellarg', array_slice($_SERVER['argv'], 1)));
+        $process = proc_open($cmd, [], $pipes, null, $_SERVER);
+        if (is_resource($process)) {
+            proc_close($process);
+        }
+    } else { // linux
         global $_, $argv;
-        pcntl_exec($_, $argv);
-    });
-    if (empty($msg)) {
-        $msg = 'restart';
+        $_ = $_SERVER['_'];
+        register_shutdown_function(function () {
+            global $_, $argv;
+            pcntl_exec($_, $argv);
+        });
     }
+    $msg = $msg ?: 'restart';
     if ($sendquit) {
         send("QUIT :$msg\n");
     }
