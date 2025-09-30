@@ -84,7 +84,7 @@ $ai_media_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images w
 	'static-assets-1.truthsocial.com',
 ];
 // gemini can do videos and more. files > $max_download_size are skipped. see e.g. https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
-// $ai_media_titles_more_types = 'x-flv,quicktime,mpeg,mpegs,mpg,mp4,webm,wmv,3gpp,x-aac,flac,mp3,m4a,mpga,opus,pcm,wav,webm,pdf';
+// $ai_media_titles_more_types = 'x-flv,quicktime,mpeg,mpegs,mpg,mp4,webm,wmv,3gpp,x-aac,flac,mp3,m4a,mpga,opus,pcm,wav,webm,pdf,x-matroska';
 
 // replace in retrieved titles
 $title_replaces = [
