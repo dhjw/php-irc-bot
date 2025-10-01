@@ -274,7 +274,7 @@ function gem_query()
     $response = preg_replace('/ \[\d+(?:, \d+)*? - .*?\]/', '', $response);
     $response = preg_replace('/ \[.*?(?:\d+ ,)*? \d+\]/', '', $response);
     $response = preg_replace('/ \[\d+\.\d+(?:, \d+\.\d+)*?\]/', '', $response);
-    $response = preg_replace('/ ?\[cite: search_results (?:\d+_\d+(?:, )?)+]/', '', $response);
+    $response = preg_replace('/ ?\[cite: .*?]/', '', $response);
 
     // append current request and response to memory
     if ($gem_config["memory_enabled"]) {
