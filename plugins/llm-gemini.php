@@ -227,54 +227,92 @@ function gem_query()
     }
 
     echo "[gem-request] data: " . json_encode($data) . "\n";
-    $r = curlget([
-        CURLOPT_URL => "https://generativelanguage.googleapis.com/v1beta/models/" . $gem_config["model"] . ":generateContent?key=" . $gem_config["key"],
-        CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
-        CURLOPT_CUSTOMREQUEST => "POST",
-        CURLOPT_POSTFIELDS => json_encode($data),
-        CURLOPT_CONNECTTIMEOUT => $gem_config["curl_timeout"],
-        CURLOPT_TIMEOUT => $gem_config["curl_timeout"]
-    ], ["no_curl_impersonate" => 1]); // image data uris too big for escapeshellarg with curl_impersonate
-    $r = @json_decode($r);
-    if (empty($r)) {
-        if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-            return send("PRIVMSG $target :API error: timeout\n");
-        }
-        return send("PRIVMSG $target :API error: no response\n");
-    }
-    echo "[gem-response] " . json_encode($r) . "\n";
-    if (isset($r->error->message)) {
-        return send("PRIVMSG $target :API error: {$r->error->message}\n");
-    }
-    if (!isset($r->candidates) || empty($r->candidates)) {
-        return send("PRIVMSG $target :API error\n");
-    }
+    $retry_count = 0;
     $response = "";
-    $sources = [];
-    foreach ($r->candidates as $candidate) {
-        foreach ($candidate->content->parts as $p) {
-            $response .= $p->text;
+    $r = null;
+    $max_retries = 2;
+
+    // retry up to $max_retries if $response is empty
+    while (empty($response) && $retry_count <= $max_retries) {
+
+        // if it's a retry
+        if ($retry_count > 0) {
+            $exponent = $retry_count - 1;
+            $delay = pow(2, $exponent); // 1, 2, 4...
+            echo "[gem-retry] Delaying for {$delay}s (2^{$exponent}) before attempt " . ($retry_count + 1) . "\n";
+            sleep($delay);
         }
-        if (isset($candidate->groundingMetadata->groundingChunks)) {
-            foreach ($candidate->groundingMetadata->groundingChunks as $gc) {
-                if (isset($gc->web->uri)) {
-                    $sources[] = get_final_url($gc->web->uri);
+        $retry_count++;
+
+        // perform curl request
+        $r = curlget([
+            CURLOPT_URL => "https://generativelanguage.googleapis.com/v1beta/models/" . $gem_config["model"] . ":generateContent?key=" . $gem_config["key"],
+            CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => json_encode($data),
+            CURLOPT_CONNECTTIMEOUT => $gem_config["curl_timeout"],
+            CURLOPT_TIMEOUT => $gem_config["curl_timeout"]
+        ], ["no_curl_impersonate" => 1]);
+        $r = @json_decode($r);
+        $response = "";
+
+        // handle general errors
+        if (empty($r)) {
+            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
+                if ($retry_count > $max_retries) {
+                    return send("PRIVMSG $target :API error: Timeout\n");
+                }
+            } else {
+                if ($retry_count > $max_retries) {
+                    return send("PRIVMSG $target :API error: No response\n");
                 }
             }
-        }
-        if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
-            preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
-            foreach ($m[1] as $url) {
-                $sources[] = get_final_url($url);
+        } else {
+            echo "[gem-response] " . json_encode($r) . "\n";
+
+            // handle API errors
+            if (isset($r->error->message)) {
+                return send("PRIVMSG $target :API error: {$r->error->message}\n");
             }
+            if (!isset($r->candidates) || empty($r->candidates)) {
+                return send("PRIVMSG $target :API error\n");
+            }
+
+            // extract text and sources
+            $sources = [];
+            foreach ($r->candidates as $candidate) {
+                foreach ($candidate->content->parts as $p) {
+                    $response .= $p->text;
+                }
+                if (isset($candidate->groundingMetadata->groundingChunks)) {
+                    foreach ($candidate->groundingMetadata->groundingChunks as $gc) {
+                        if (isset($gc->web->uri)) {
+                            $sources[] = get_final_url($gc->web->uri);
+                        }
+                    }
+                }
+                if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
+                    preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
+                    foreach ($m[1] as $url) {
+                        $sources[] = get_final_url($url);
+                    }
+                }
+            }
+            $sources = array_unique($sources);
         }
     }
-    $sources = array_unique($sources);
+
+    // final check after all attempts
+    if (empty($response)) {
+        return send("PRIVMSG $target :API error: Response has no text after $retry_count attempts - try again\n");
+    }
+
     // remove inline citations that dont really match up with provided data
     $response = preg_replace('/ \[\d+(?:, \d+)*? - .*?\]/', '', $response);
     $response = preg_replace('/ \[.*?(?:\d+ ,)*? \d+\]/', '', $response);
     $response = preg_replace('/ \[\d+\.\d+(?:, \d+\.\d+)*?\]/', '', $response);
     $response = preg_replace('/ ?\[cite: .*?]/', '', $response);
+    $response = trim($response);
 
     // append current request and response to memory
     if ($gem_config["memory_enabled"]) {
