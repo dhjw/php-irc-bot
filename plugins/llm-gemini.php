@@ -227,54 +227,102 @@ function gem_query()
     }
 
     echo "[gem-request] data: " . json_encode($data) . "\n";
-    $r = curlget([
-        CURLOPT_URL => "https://generativelanguage.googleapis.com/v1beta/models/" . $gem_config["model"] . ":generateContent?key=" . $gem_config["key"],
-        CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
-        CURLOPT_CUSTOMREQUEST => "POST",
-        CURLOPT_POSTFIELDS => json_encode($data),
-        CURLOPT_CONNECTTIMEOUT => $gem_config["curl_timeout"],
-        CURLOPT_TIMEOUT => $gem_config["curl_timeout"]
-    ], ["no_curl_impersonate" => 1]); // image data uris too big for escapeshellarg with curl_impersonate
-    $r = @json_decode($r);
-    if (empty($r)) {
-        if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-            return send("PRIVMSG $target :API error: timeout\n");
+    $retry_count = 0;
+    $max_retries = 2;
+    $r = null;
+    $error_msg = "";
+
+    // retry up to $max_retries if $response is empty
+    while (true) {
+
+        // if it's a retry
+        if ($retry_count > 0) {
+            $exponent = $retry_count - 1;
+            $delay = pow(2, $exponent); // 1, 2, 4...
+            echo "[gem-retry] Delaying {$delay}s (2^{$exponent}) before attempt " . ($retry_count + 1) . "\n";
+            sleep($delay);
         }
-        return send("PRIVMSG $target :API error: no response\n");
-    }
-    echo "[gem-response] " . json_encode($r) . "\n";
-    if (isset($r->error->message)) {
-        return send("PRIVMSG $target :API error: {$r->error->message}\n");
-    }
-    if (!isset($r->candidates) || empty($r->candidates)) {
-        return send("PRIVMSG $target :API error\n");
-    }
-    $response = "";
-    $sources = [];
-    foreach ($r->candidates as $candidate) {
-        foreach ($candidate->content->parts as $p) {
-            $response .= $p->text;
+        $retry_count++;
+
+        // perform curl request
+        $r = curlget([
+            CURLOPT_URL => "https://generativelanguage.googleapis.com/v1beta/models/" . $gem_config["model"] . ":generateContent?key=" . $gem_config["key"],
+            CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => json_encode($data),
+            CURLOPT_CONNECTTIMEOUT => $gem_config["curl_timeout"],
+            CURLOPT_TIMEOUT => $gem_config["curl_timeout"]
+        ], ["no_curl_impersonate" => 1]);
+        $r = @json_decode($r);
+        echo "[gem-response] " . (empty($r) ? "<blank>" : json_encode($r)) . "\n";
+        $response = "";
+        $response_nomd = "";
+
+        // handle empty result
+        if (empty($r)) {
+            if ($retry_count > $max_retries) {
+                if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
+                    $error_msg = "Timeout";
+                } else {
+                    $error_msg = "No response";
+                }
+            } else {
+                continue;
+            }
         }
-        if (isset($candidate->groundingMetadata->groundingChunks)) {
-            foreach ($candidate->groundingMetadata->groundingChunks as $gc) {
-                if (isset($gc->web->uri)) {
-                    $sources[] = get_final_url($gc->web->uri);
+
+        // extract text and sources
+        $sources = [];
+        if (isset($r->candidates) && !empty($r->candidates)) {
+            foreach ($r->candidates as $candidate) {
+                foreach ($candidate->content->parts as $p) {
+                    $response .= $p->text;
+                }
+                if (isset($candidate->groundingMetadata->groundingChunks)) {
+                    foreach ($candidate->groundingMetadata->groundingChunks as $gc) {
+                        if (isset($gc->web->uri)) {
+                            $sources[] = get_final_url($gc->web->uri);
+                        }
+                    }
+                }
+                if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
+                    preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
+                    foreach ($m[1] as $url) {
+                        $sources[] = get_final_url($url);
+                    }
                 }
             }
+        } else {
+            $error_msg = "No response";
         }
-        if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
-            preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
-            foreach ($m[1] as $url) {
-                $sources[] = get_final_url($url);
-            }
+        $sources = array_unique($sources);
+
+        // handle other errors
+        if (isset($r->error->message)) {
+            $error_msg = $r->error->message;
         }
+
+        // remove inline citations that dont really match up with provided data
+        $response = preg_replace('/ \[\d+(?:, \d+)*? - .*?\]/', '', $response);
+        $response = preg_replace('/ \[.*?(?:\d+ ,)*? \d+\]/', '', $response);
+        $response = preg_replace('/ \[\d+\.\d+(?:, \d+\.\d+)*?\]/', '', $response);
+        $response = preg_replace('/ ?\[cite: .*?]/', '', $response);
+        $response = trim($response);
+    
+        // got response
+        $response_nomd = gem_remove_markdown($response);
+        if ($response && $response_nomd) {
+            break;
+        } else {
+            $error_msg = "No response";
+        }
+
+        // output error on max retries
+        if ($retry_count >= $max_retries) {
+            return send("PRIVMSG $target :API Error: $error_msg\n");
+        }
+        // retry if no response. TODO dont retry if blocked for content
     }
-    $sources = array_unique($sources);
-    // remove inline citations that dont really match up with provided data
-    $response = preg_replace('/ \[\d+(?:, \d+)*? - .*?\]/', '', $response);
-    $response = preg_replace('/ \[.*?(?:\d+ ,)*? \d+\]/', '', $response);
-    $response = preg_replace('/ \[\d+\.\d+(?:, \d+\.\d+)*?\]/', '', $response);
-    $response = preg_replace('/ ?\[cite: search_results (?:\d+_\d+(?:, )?)+]/', '', $response);
 
     // append current request and response to memory
     if ($gem_config["memory_enabled"]) {
@@ -299,18 +347,8 @@ function gem_query()
         $gem_config["memory_items"][] = $c_obj;
     }
 
-    // remove markdown for non-paste/irc output
-    $c = $response;
-    $c = preg_replace("/^#{2,} /m", "$1", $c); // ## headers
-    $c = preg_replace("/^( *?)\*/m", "$1", $c); // ul asterisks
-    $c = preg_replace("/^```[\w-]+?$\n?/m", "", $c); // fenced code header
-    $c = preg_replace("/^```$\n?/m", "", $c); // fenced code footer
-    $c = preg_replace("/(^|[^*])\*\*(.*?)\*\*([^*]|$)/m", "$1$2$3", $c); // bold
-    $c = preg_replace("/(^|[^*])\*(.*?)\*([^*]|$)/m", "$1$2$3", $c); // italic
-    // $c = preg_replace("/`(.*?)`/", "$1", $c); // backtick code
-
     // get lines wrapped for irc
-    $out_lines = gem_get_output_lines($c);
+    $out_lines = gem_get_output_lines($response_nomd);
 
     // github response
     if (($gem_config["github_enabled"] && count($out_lines) >= $gem_config["github_min_lines"]) || $github_force) {
@@ -466,6 +504,19 @@ function gem_get_output_lines($content)
         }
     }
     return $out_lines;
+}
+
+// basic markdown removal for non-paste output
+function gem_remove_markdown($text)
+{
+    $text = preg_replace("/^#{2,} /m", "$1", $text); // ## headers
+    $text = preg_replace("/^( *?)\*/m", "$1", $text); // ul asterisks
+    $text = preg_replace("/^```[\w-]+?$\n?/m", "", $text); // fenced code header
+    $text = preg_replace("/^```$\n?/m", "", $text); // fenced code footer
+    $text = preg_replace("/(^|[^*])\*\*(.*?)\*\*([^*]|$)/m", "$1$2$3", $text); // bold
+    $text = preg_replace("/(^|[^*])\*(.*?)\*([^*]|$)/m", "$1$2$3", $text); // italic
+    // $text = preg_replace("/`(.*?)`/", "$1", $text); // backtick code
+    return $text;
 }
 
 // link titles for plugin-created github links
