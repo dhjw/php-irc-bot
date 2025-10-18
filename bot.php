@@ -3682,34 +3682,55 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
     $data->model = $ai_media_titles_model;
     $data->stream = false;
     $data->temperature = 0;
-    $r = curlget([
-        CURLOPT_URL => $ai_media_titles_baseurl . "/chat/completions",
-        CURLOPT_HTTPHEADER => ["Content-Type: application/json", "Authorization: Bearer " . $ai_media_titles_key],
-        CURLOPT_CUSTOMREQUEST => "POST",
-        CURLOPT_POSTFIELDS => json_encode($data),
-        CURLOPT_CONNECTTIMEOUT => 45,
-        CURLOPT_TIMEOUT => 45
-    ], ["no_curl_impersonate" => 1]); // image data uris too big for escapeshellarg with curl_impersonate
-    if ($amt_debug && substr($data->messages[1]->content[0]->image_url->url, 0, 5) == "data:") { // after req to avoid large copy
-        $data->messages[1]->content[0]->image_url->url = substr($data->messages[1]->content[0]->image_url->url, 0, strpos($data->messages[1]->content[0]->image_url->url, ',') + 17) . '<removed>';
-        echo "[get_ai_media_title request] " . json_encode($data) . "\n";
-    }
-    $r = @json_decode($r);
-    if (isset($r->error)) {
-        print_r($r);
-    }
-    if (empty($r)) {
-        if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-            echo "[get_ai_media_title] API error: timeout\n";
+    $tries = 0;
+    while (true) {
+        $tries++;
+        $r = curlget([
+            CURLOPT_URL => $ai_media_titles_baseurl . "/chat/completions",
+            CURLOPT_HTTPHEADER => ["Content-Type: application/json", "Authorization: Bearer " . $ai_media_titles_key],
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => json_encode($data),
+            CURLOPT_CONNECTTIMEOUT => 45,
+            CURLOPT_TIMEOUT => 45
+        ], ["no_curl_impersonate" => 1]); // image data uris too big for escapeshellarg with curl_impersonate
+        if ($amt_debug && substr($data->messages[1]->content[0]->image_url->url, 0, 5) == "data:") { // after req to avoid large copy
+            $data->messages[1]->content[0]->image_url->url = substr($data->messages[1]->content[0]->image_url->url, 0, strpos($data->messages[1]->content[0]->image_url->url, ',') + 17) . '<removed>';
+            echo "[get_ai_media_title request] " . json_encode($data) . "\n";
+        }
+        $r = @json_decode($r);
+        // success
+        if (isset($r->choices[0]->message->content)) {
+            break;
+        }
+        // error: retry or fail
+        $error_msg = '';
+        if (isset($r->error)) {
+            print_r($r);
+            $error_msg = "API error: " . ($r->error->message ?? 'Unknown');
+        } elseif (empty($r)) {
+            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
+                $error_msg = "API error: Timeout";
+            } else {
+                $error_msg = "API error: No response";
+            }
+        } else {
+            $error_code = is_array($r) ? ($r[0]->error->code ?? null) : ($r->error->code ?? null);
+            if ($error_code === 503) {
+                $error_msg = "API error: 503 Service Unavailable";
+            } else {
+                $error_msg = "API error: No content or unhandled";
+            }
+            echo "[get_ai_media_title response] " . json_encode($r) . "\n";
+        }
+        // 2 retries, 3 total
+        if ($tries < 3) {
+            echo "[get_ai_media_title] $error_msg. Retrying ($tries/3)...\n";
+            sleep(2);
+            continue;
+        } else {
+            echo "[get_ai_media_title] $error_msg. Max retries reached.\n";
             return false;
         }
-        echo "[get_ai_media_title] API error: no response\n";
-        return false;
-    }
-    if (!isset($r->choices[0]->message->content)) {
-        echo "[get_ai_media_title] API error: no content\n";
-        echo "[get_ai_media_title response] " . json_encode($r) . "\n";
-        return false;
     }
     if ($amt_debug) {
         echo "[get_ai_media_title response] " . json_encode($r) . "\n";
