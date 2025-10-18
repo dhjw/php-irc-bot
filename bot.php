@@ -1217,8 +1217,8 @@ while (1) {
                 }
                 $parse_url = parse_url($u);
 
-                // get final url for t.co links
-                if (preg_match("#^https://t\.co/#", $u)) {
+                // get final url for some short links
+                if (preg_match("#^https://(?:t\.co|spotify\.link)/#", $u)) {
                     $u = get_final_url($u);
                 }
 
@@ -1473,6 +1473,15 @@ while (1) {
                                 continue;
                             }
                         }
+                    }
+                }
+
+                // spotify short links step 2
+                if (preg_match("#^https://spotify\.app\.link/#", $u)) {
+                    $html = curlget([CURLOPT_URL => $u]);
+                    preg_match('/<a class="secondary-action" href="(.*?)"/', $html, $m);
+                    if (!empty($m[1])) {
+                        $u = $m[1];
                     }
                 }
 
