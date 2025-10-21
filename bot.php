@@ -2391,6 +2391,29 @@ while (1) {
                     }
                 }
 
+                // govdeals.com assets - title via ajax
+                if (preg_match('#^https?://www.govdeals.com/\w+/asset/(\d+/\d+)#', $u, $m)) {
+                    $html = curlget([CURLOPT_URL => $u]); // get main js
+                    if ($curl_info['RESPONSE_CODE'] == 200 && preg_match('#<script src="(main\..*?\.js)"#', $html, $m2)) {
+                        $html = curlget([CURLOPT_URL => "https://www.govdeals.com/{$m2[1]}"]); // get api key
+                        if ($curl_info['RESPONSE_CODE'] == 200 && preg_match('#maestroApiKey:"([a-z0-9-]+)"#', $html, $m3)) {
+                            $r = json_decode(curlget([
+                                CURLOPT_URL => "https://maestro.lqdt1.com/assets/{$m[1]}/false", // x-aci works with uuid [f-]{36} in cli but not php w/same headers?
+                                CURLOPT_HTTPHEADER => ["Content-Type: application/json", "x-api-correlation-id: {$m3[1]}", "x-api-key: {$m3[1]}", "x-user-id: -1"],
+                                CURLOPT_POSTFIELDS => '{"businessId":"GD","siteId":1}',
+                            ]));
+                            if (isset($r->assetShortDesc)) {
+                                $t = "[ " . str_shorten($r->assetShortDesc) . " ]";
+                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+                                if ($title_cache_enabled) {
+                                    add_to_title_cache($u, $t);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 $og_title_urls_regex = ['#https?://(?:www\.)?brighteon\.com#', '#https?://(?:www\.)?campusreform\.org#',];
                 foreach ($og_title_urls_regex as $r) {
                     if (preg_match($r, $u)) {
