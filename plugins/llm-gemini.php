@@ -227,22 +227,27 @@ function gem_query()
     }
 
     echo "[gem-request] data: " . json_encode($data) . "\n";
-    $retry_count = 0;
-    $max_retries = 2;
+    $try_count = 0;
+    $max_tries = 3;
     $r = null;
     $error_msg = "";
 
-    // retry up to $max_retries if $response is empty
+    // retry up to $max_tries if $response is empty
     while (true) {
+        $try_count++;
+
+        // output error on max retries
+        if ($try_count > $max_tries) {
+            return send("PRIVMSG $target :API Error: $error_msg\n");
+        }
 
         // if it's a retry
-        if ($retry_count > 0) {
-            $exponent = $retry_count - 1;
+        if ($try_count > 1) {
+            $exponent = $try_count - 2;
             $delay = pow(2, $exponent); // 1, 2, 4...
-            echo "[gem-retry] Delaying {$delay}s (2^{$exponent}) before attempt " . ($retry_count + 1) . "\n";
+            echo "[gem-retry] Delaying {$delay}s (2^{$exponent}) before attempt " . ($try_count) . "\n";
             sleep($delay);
         }
-        $retry_count++;
 
         // perform curl request
         $r = curlget([
@@ -260,47 +265,48 @@ function gem_query()
 
         // handle empty result
         if (empty($r)) {
-            if ($retry_count > $max_retries) {
-                if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-                    $error_msg = "Timeout";
-                } else {
-                    $error_msg = "No response";
-                }
+            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
+                $error_msg = "Timeout";
             } else {
-                continue;
+                $error_msg = "No response";
             }
+            continue;
+        }
+
+        // handle other errors
+        // TODO dont retry if blocked for content
+        if (isset($r->error->message)) {
+            $error_msg = $r->error->message;
+            continue;
+        }
+
+        // handle missing text
+        if (!isset($r->candidates) || empty($r->candidates)) {
+            $error_msg = "No response";
+            continue;
         }
 
         // extract text and sources
         $sources = [];
-        if (isset($r->candidates) && !empty($r->candidates)) {
-            foreach ($r->candidates as $candidate) {
-                foreach ($candidate->content->parts as $p) {
-                    $response .= $p->text;
-                }
-                if (isset($candidate->groundingMetadata->groundingChunks)) {
-                    foreach ($candidate->groundingMetadata->groundingChunks as $gc) {
-                        if (isset($gc->web->uri)) {
-                            $sources[] = get_final_url($gc->web->uri);
-                        }
-                    }
-                }
-                if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
-                    preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
-                    foreach ($m[1] as $url) {
-                        $sources[] = get_final_url($url);
+        foreach ($r->candidates as $candidate) {
+            foreach ($candidate->content->parts as $p) {
+                $response .= $p->text;
+            }
+            if (isset($candidate->groundingMetadata->groundingChunks)) {
+                foreach ($candidate->groundingMetadata->groundingChunks as $gc) {
+                    if (isset($gc->web->uri)) {
+                        $sources[] = get_final_url($gc->web->uri);
                     }
                 }
             }
-        } else {
-            $error_msg = "No response";
+            if (isset($candidate->groundingMetadata->searchEntryPoint->renderedContent)) {
+                preg_match_all('#href="(https://vertexaisearch[^"]+)#', $candidate->groundingMetadata->searchEntryPoint->renderedContent, $m);
+                foreach ($m[1] as $url) {
+                    $sources[] = get_final_url($url);
+                }
+            }
         }
         $sources = array_unique($sources);
-
-        // handle other errors
-        if (isset($r->error->message)) {
-            $error_msg = $r->error->message;
-        }
 
         // remove inline citations that dont really match up with provided data
         $response = preg_replace('/ \[\d+(?:, \d+)*? - .*?\]/', '', $response);
@@ -316,12 +322,6 @@ function gem_query()
         } else {
             $error_msg = "No response";
         }
-
-        // output error on max retries
-        if ($retry_count >= $max_retries) {
-            return send("PRIVMSG $target :API Error: $error_msg\n");
-        }
-        // retry if no response. TODO dont retry if blocked for content
     }
 
     // append current request and response to memory
