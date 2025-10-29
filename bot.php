@@ -1244,6 +1244,8 @@ while (1) {
                 $meta_skip_blank = false;
                 echo "Checking URL: $u\n";
                 $html = '';
+                $amt_mime = '';
+                $amt_file = '';
 
                 // imgur via api
                 if (!empty($imgur_client_id) && preg_match('#^https?://([im]\.)?imgur\.com/(?:(?:gallery|a|r)/)?([\w-]+)(?:/([\w-]+))?#', $u, $m)) {
@@ -1320,6 +1322,26 @@ while (1) {
                         }
                     }
                     echo "$u\n";
+                }
+
+                // postimg.cc, get direct link for ai
+                if (!empty($ai_media_titles_enabled) && preg_match('#^https?://(?:i\.)?postimg\.cc/([a-zA-Z0-9_/.-]+)$#', $u)) {
+                    $html = curlget([CURLOPT_URL => $u], ["no_curl_impersonate" => 1]); // impersonate always redirects to html
+                    if (preg_match('/<meta property="og:image" content="(.*?)"/', $html, $m)) { // got html
+                        echo "Found direct link: $m[1]\n";
+                        $html = curlget([CURLOPT_URL => $m[1]], ["no_curl_impersonate" => 1]); // get image
+                    } else {
+                        $m = [1 => $u];
+                    }
+                    $finfo = new finfo(FILEINFO_MIME_TYPE);
+                    $mime = $finfo->buffer($html);
+                    if (preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) { // dont re-dl
+                        $amt_mime = $mime;
+                        $amt_file = $html;
+                        $u = $m[1];
+                    } else {
+                        echo "Failed to get supported image (". ($html && $mime ? "got $mime" : "no response") . "\n";
+                    }
                 }
 
                 // youtube via api, w/invidious mirror support
@@ -2425,7 +2447,7 @@ while (1) {
                 $ai_image_title_done = false;
                 if (!empty($ai_media_titles_enabled) && preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png|webp|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#i", $u)) {
                     echo "Using AI to summarize\n";
-                    $t = get_ai_media_title($u);
+                    $t = get_ai_media_title($u, $amt_file, $amt_mime);
                     if (!empty($t)) {
                         $t = str_shorten($t);
                         $t = "[ $t ]";
@@ -2482,9 +2504,9 @@ while (1) {
                 }
                 // check if it's an image for ai
                 if ($ai_media_titles_enabled && !$ai_image_title_done) {
-                    $finfo = new finfo(FILEINFO_MIME);
-                    $mime = explode(';', $finfo->buffer($html))[0];
-                    if (preg_match("#(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
+                    $finfo = new finfo(FILEINFO_MIME_TYPE);
+                    $mime = $finfo->buffer($html);
+                    if (preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
                         echo "Using AI to summarize\n";
                         $t = get_ai_media_title($u, $html, $mime);
                         if (!empty($t)) {
@@ -3661,14 +3683,14 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
             }
         }
         if (!$mime) {
-            $finfo = new finfo(FILEINFO_MIME);
-            $mime = explode(';', $finfo->buffer($image_data))[0];
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = $finfo->buffer($image_data);
         }
-        if (!preg_match("#(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
+        if (!preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
             echo "[get_ai_media_title] Only jpg, png, webp, avif, gif" . ($ai_media_titles_more_types ? str_replace('|', ', ', $amt_mt_regex) : "") . " links supported (got $mime)\n";
             return false;
         }
-        if (preg_match("#image/(?:webp|avif|gif)#", $mime)) { // convert to png and use data-uri
+        if (preg_match("#^\w+/(?:webp|avif|gif)#", $mime)) { // convert to png and use data-uri
             $im = imagecreatefromstring($image_data);
             if (!$im) {
                 echo "[get_ai_media_title] Error converting image. Corrupt image, missing php-gd or no $mime support?\n";
