@@ -1498,6 +1498,94 @@ while (1) {
                     }
                 }
 
+                // grokipedia
+                if (preg_match("#^https://grokipedia\.com/page/.*?(?:\#(.*))?$#", $u, $m)) {
+                    $html = curlget([CURLOPT_URL => $u]);
+                    $dom = new DomDocument();
+                    @$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
+                    $f = new DomXPath($dom);
+                    $nl = $f->query("//article//h1");
+                    if ($nl->length > 0) {
+                        $id = $m[1] ?? $nl->item(0)->getAttribute('id');
+                        $nl = $f->query("//article//*[self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6][@id='{$id}']")->item(0);
+                        if ($nl) {
+                            $t = '';
+                            $lv = 7;
+                            if (preg_match('/^h(\d)$/i', $nl->nodeName, $lm)) {
+                                $lv = (int) $lm[1];
+                            }
+                            $c = $nl->nextSibling;
+                            while ($c) {
+                                $cn = $c->nodeName;
+                                $ih = preg_match('/^h(\d)$/i', $cn, $lm);
+                                if ($ih) {
+                                    $cl = (int) $lm[1];
+                                    if ($cl <= $lv) {
+                                        break;
+                                    }
+                                }
+                                if ($cn === 'table') {
+                                    $t .= " ...";
+                                    $c = $c->nextSibling;
+                                    continue;
+                                }
+                                if ($cn === 'sup') {
+                                    if (preg_match('/^\[\d+]$/', trim($c->textContent))) {
+                                        $c = $c->nextSibling;
+                                        continue;
+                                    }
+                                }
+                                if ($c->nodeType === 1) {
+                                    $tmp = $c->cloneNode(true);
+                                    $table_nodes = $f->query(".//table", $tmp);
+                                    if ($table_nodes->length > 0) {
+                                        foreach ($table_nodes as $tab) {
+                                            $tab->parentNode->replaceChild($dom->createTextNode(" ..."), $tab);
+                                        }
+                                    }
+                                    $s = $f->query(".//sup", $tmp);
+                                    foreach ($s as $p) {
+                                        if (preg_match('/^\[\d+]$/', trim($p->textContent))) {
+                                            $p->parentNode->removeChild($p);
+                                        }
+                                    }
+                                    $co = $dom->saveHTML($tmp);
+                                    if ($ih) {
+                                        $t .= "\n" . strip_tags($co) . ": \n";
+                                    } elseif ($cn === 'li') {
+                                        $t .= "- " . strip_tags($co) . "\n";
+                                    } elseif (in_array($cn, ['p', 'div', 'blockquote', 'span', 'a'])) {
+                                        $ct = preg_replace('/\s+/', ' ', strip_tags($co));
+                                        $t .= in_array($cn, ['p', 'div', 'blockquote']) ? ($ct . "\n\n") : ($ct . " ");
+                                    } elseif ($cn === 'br') {
+                                        $t .= "\n";
+                                    }
+                                } elseif ($c->nodeType === 3) {
+                                    $tr = trim($c->nodeValue);
+                                    if ($tr !== '') {
+                                        $t .= $tr . " ";
+                                    }
+                                }
+                                $c = $c->nextSibling;
+                            }
+                            $t = preg_replace("/\s*(\n\n\n+)\s*/", "\n\n", $t);
+                            $t = trim(preg_replace('/\s+/', ' ', $t));
+                            if ($t == '...') {
+                                echo "Skipping snippet output: $t\n";
+                                continue;
+                            }
+                            if (!empty($t)) {
+                                $t = str_shorten($t, 320);
+                                send("PRIVMSG $channel :\"$t\"\n");
+                                if ($title_cache_enabled) {
+                                    add_to_title_cache($u, "\"$e\"");
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 // spotify short links step 2
                 if (preg_match("#^https://spotify\.app\.link/#", $u)) {
                     $html = curlget([CURLOPT_URL => $u]);
