@@ -5,7 +5,7 @@
  *
  * note default $llm_config vars below can be modified after plugin inclusion in bot settings file without changing this file
  * see https://github.com/dhjw/php-irc-bot?tab=readme-ov-file#including-plugin-files
- * 
+ *
  * github pastes are same as with llm-gemini.php plugin (for gemini with native features) - can use same github user/repo/key/page
  */
 
@@ -25,8 +25,8 @@ $llm_config = [
             "trigger" => "!grok",
             "base_url" => "https://api.x.ai/v1",
             "key" => "", // https://console.x.ai/
-            "model" => "grok-3-mini", // https://docs.x.ai/docs/models
-            "vision_model" => "grok-2-vision",
+            "model" => "grok-4-fast", // https://docs.x.ai/docs/models
+            "vision_model" => "grok-4-fast",
             "grok_search_enabled" => false, // https://docs.x.ai/docs/guides/live-search. $25 USD per 1K searches in July 2025
             "grok_search_max_results" => 15, // 1-30
             "grok_search_mode" => "auto", // off, auto, on
