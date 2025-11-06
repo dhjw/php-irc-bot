@@ -248,6 +248,7 @@ while (1) {
                 continue;
             }
             preg_match('/^:[^ ]*? PRIVMSG [^ ]*? :(([^ ]*?)( .*)?)\r\n$/', $data, $m);
+            $orig_msg = $m[1];
             $msg = trim($m[1]);
             $trigger = $m[2];
             if (!empty($m[3]) && !empty(trim($m[3]))) {
@@ -1297,7 +1298,7 @@ while (1) {
                                 continue;
                             } else {
                                 echo "No description, passing\n";
-                                // use direct link, if not already, for ai image titles
+                                // use direct link, if not already, for ai media titles
                                 if (isset($r->data->link)) {
                                     $u = $r->data->link;
                                     $parse_url = parse_url($u);
@@ -2532,20 +2533,26 @@ while (1) {
                 }
 
                 // ai media summaries
-                $ai_image_title_done = false;
-                if (!empty($ai_media_titles_enabled) && preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png|webp|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#i", $u)) {
-                    echo "Using AI to summarize\n";
-                    $t = get_ai_media_title($u, $amt_file, $amt_mime);
-                    if (!empty($t)) {
-                        $t = str_shorten($t);
-                        $t = "[ $t ]";
-                        send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                        if ($title_cache_enabled) {
-                            add_to_title_cache($u, $t);
+                if (!empty($ai_media_titles_enabled)) {
+                    $amt_done = false;
+                    if (preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png|webp|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#i", $u)) {
+                        if (substr($orig_msg, -2) <> '  ') {
+                            echo "Using AI to summarize\n";
+                            $t = get_ai_media_title($u, $amt_file, $amt_mime);
+                            if (!empty($t)) {
+                                $t = str_shorten($t);
+                                $t = "[ $t ]";
+                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+                                if ($title_cache_enabled) {
+                                    add_to_title_cache($u, $t);
+                                }
+                                continue;
+                            }
+                        } else {
+                            echo "Skipping AI media title due to double space at end of message\n";
                         }
-                        continue;
+                        $amt_done = true;
                     }
-                    $ai_image_title_done = true;
                 }
 
                 // skips
@@ -2591,20 +2598,24 @@ while (1) {
                     continue;
                 }
                 // check if it's an image for ai
-                if ($ai_media_titles_enabled && !$ai_image_title_done) {
+                if ($ai_media_titles_enabled && !$amt_done) {
                     $finfo = new finfo(FILEINFO_MIME_TYPE);
                     $mime = $finfo->buffer($html);
                     if (preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
-                        echo "Using AI to summarize\n";
-                        $t = get_ai_media_title($u, $html, $mime);
-                        if (!empty($t)) {
-                            $t = str_shorten($t);
-                            $t = "[ $t ]";
-                            send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                            if ($title_cache_enabled) {
-                                add_to_title_cache($u, $t);
+                        if (substr($orig_msg, -2) <> '  ') {
+                            echo "Using AI to summarize\n";
+                            $t = get_ai_media_title($u, $html, $mime);
+                            if (!empty($t)) {
+                                $t = str_shorten($t);
+                                $t = "[ $t ]";
+                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+                                if ($title_cache_enabled) {
+                                    add_to_title_cache($u, $t);
+                                }
+                                continue;
                             }
-                            continue;
+                        } else {
+                            echo "Skipping AI media title due to double space at end of message\n";
                         }
                     }
                 }
