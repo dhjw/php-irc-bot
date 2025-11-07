@@ -1326,9 +1326,9 @@ while (1) {
                 }
 
                 // postimg.cc, get direct link for ai
-                if (!empty($ai_media_titles_enabled) && preg_match('#^https?://(?:i\.)?postimg\.cc/([a-zA-Z0-9_/.-]+)$#', $u)) {
+                if (!empty($ai_media_titles_enabled) && preg_match('#^https?://(?:i\.)?postimg\.cc/([a-zA-Z0-9_/.%-]+)$#', $u)) {
                     $html = curlget([CURLOPT_URL => $u], ["no_curl_impersonate" => 1]); // impersonate always redirects to html
-                    if (preg_match('/<meta property="og:image" content="(.*?)"/', $html, $m)) { // got html
+                    if (preg_match('/<meta property="og:image" content="(.*?)"/', $html, $m) || preg_match('#<a\s.*?href=["\']([^"\']*?)["\'].*?>.*?Download original image.*?</a>#', $html, $m)) { // got html
                         echo "Found direct link: $m[1]\n";
                         $html = curlget([CURLOPT_URL => $m[1]], ["no_curl_impersonate" => 1]); // get image
                     } else {
