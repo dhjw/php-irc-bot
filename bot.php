@@ -1864,7 +1864,7 @@ while (1) {
                             echo "no fullname\n";
                             continue;
                         }
-                        $a = $n[0]->nodeValue;
+                        $a = rtrim(preg_replace('#<div>.*</div>#', '', $n[0]->nodeValue));
                         $n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'tweet-content')]");
                         if (empty($n) || $n->length === 0) {
                             echo "no tweet content\n";
