@@ -2645,7 +2645,7 @@ while (1) {
                     }
 
                     // auto translate title
-                    if (!empty($auto_translate_titles) && !empty($gcloud_translate_keyfile) && !empty($title)) {
+                    if (!empty($auto_translate_titles) && !empty($gcloud_translate_keyfile) && !empty($title) && !preg_match('#//en\.|/english/|/en(?:-[a-z]{2})?/|/en(?:-[a-z]{2})?$#i', $u)) {  // skip if url indicates en as some sites dont update html tag
                         $h = $dom->getElementsByTagName('html')[0];
                         if (!empty($h) && !empty($h->attributes->getNamedItem('lang'))) {
                             $lc = strtolower(explode('-', $h->attributes->getNamedItem('lang')->value)[0]);
