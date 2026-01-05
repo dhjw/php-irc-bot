@@ -200,7 +200,7 @@ while (1) {
                 if ($ex[1] == '433') {
                     echo "Nick in use.. changing and reconnecting\n";
                     $nick = $orignick . $altchars[rand(0, count($altchars) - 1)];
-                    continue(2);
+                    continue (2);
                 }
                 if ($ex[1] == '376' || $ex[1] == '422') {
                     break;
@@ -310,7 +310,7 @@ while (1) {
             foreach ($ignore_nicks as $n) {
                 if (preg_match("/^" . preg_quote($n) . "[^a-zA-Z]?$/", $incnick)) {
                     echo "Ignoring $incnick\n";
-                    continue(2);
+                    continue (2);
                 }
             }
         }
@@ -318,7 +318,7 @@ while (1) {
         // custom loop functions
         foreach ($custom_loop_functions as $f) {
             if ($f() == 2) {
-                continue(2);
+                continue (2);
             }
         }
 
@@ -737,7 +737,7 @@ while (1) {
                     } else {
                         send("PRIVMSG $target :$text\n");
                     }
-                    continue(2);
+                    continue (2);
                 }
             }
         }
@@ -945,7 +945,7 @@ while (1) {
                             continue;
                         }
                         if ($tmp->Response == 'True') {
-                            break(2);
+                            break (2);
                         }
                         //usleep(100000);
                     }
@@ -1213,7 +1213,7 @@ while (1) {
                 foreach ($ignore_urls as $v) {
                     if (preg_match('#^\w*://(?:[a-zA-Z0-9-]+\.)*' . preg_quote($v) . '#', $u)) {
                         echo "Ignored URL $v\n";
-                        continue(2);
+                        continue (2);
                     }
                 }
                 $parse_url = parse_url($u);
@@ -1341,7 +1341,7 @@ while (1) {
                         $amt_file = $html;
                         $u = $m[1];
                     } else {
-                        echo "Failed to get supported image (". ($html && $mime ? "got $mime" : "no response") . "\n";
+                        echo "Failed to get supported image (" . ($html && $mime ? "got $mime" : "no response") . "\n";
                     }
                 }
 
@@ -1699,7 +1699,7 @@ while (1) {
                             if ($title_cache_enabled) {
                                 add_to_title_cache($u, $t);
                             }
-                            continue(2);
+                            continue (2);
                         }
                     }
                 }
@@ -1737,7 +1737,7 @@ while (1) {
                                 if ($title_cache_enabled) {
                                     add_to_title_cache($u, $t);
                                 }
-                                continue(2);
+                                continue (2);
                             } else {
                                 echo "error parsing reddit comment from html\n";
                             }
@@ -1771,7 +1771,7 @@ while (1) {
                                 if ($title_cache_enabled) {
                                     add_to_title_cache($u, $t);
                                 }
-                                continue(2);
+                                continue (2);
                             } else {
                                 echo "error parsing reddit title from html\n";
                             }
@@ -1977,7 +1977,6 @@ while (1) {
                             add_to_title_cache($u, $t);
                         }
                         continue;
-
                     } // bio
                     elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
                         continue;
@@ -2421,7 +2420,7 @@ while (1) {
                                                     $t = str_shorten($t, 424);
                                                     $t = "[ $t ]";
                                                     send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                                                    continue(2);
+                                                    continue (2);
                                                 }
                                             }
                                         }
@@ -2680,7 +2679,7 @@ while (1) {
                 foreach ($notitletitles as $ntt) {
                     if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
                         echo "Skipping output of title: $title\n";
-                        continue(2);
+                        continue (2);
                     }
                 }
                 if ($title == get_base_domain($parse_url['host'])) {
@@ -2764,7 +2763,6 @@ while (1) {
                         // $flood_lines=[];
                     }
                 }
-
             }
         }
 
@@ -3974,7 +3972,6 @@ function init_db()
     }
     echo "OK\n";
     return $db;
-
 }
 
 function set_data($var, $val, $instance = null)
