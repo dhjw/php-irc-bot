@@ -1507,7 +1507,8 @@ while (1) {
                     $f = new DomXPath($dom);
                     $nl = $f->query("//article//h1");
                     if ($nl->length > 0) {
-                        $id = $m[1] ?? $nl->item(0)->getAttribute('id');
+                        $h1 = $nl->item(0);
+                        $id = $m[1] ?? ($h1 instanceof DOMElement ? $h1->getAttribute('id') : '');
                         $nl = $f->query("//article//*[self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6][@id='{$id}']")->item(0);
                         if ($nl) {
                             $t = '';
@@ -2908,7 +2909,6 @@ function curlget($opts = [], $more_opts = [])
         if (curl_errno($ch) == CURLE_FILESIZE_EXCEEDED || strpos($curl_error, 'Exceeded the maximum allowed file size') !== -1) {
             $curl_info['SIZE_ABORT'] = true;
         } // str check for PHP<8.4
-        curl_close($ch);
     }
 
     if ($is_scrapingbee && $curl_info['RESPONSE_CODE'] <> 200) {
@@ -3768,7 +3768,7 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
     global $ai_media_titles_key, $ai_media_titles_baseurl, $ai_media_titles_model, $ai_media_titles_prompt, $ai_media_titles_dl_hosts, $ai_media_titles_more_types, $amt_is_gemini, $amt_mt_regex, $amt_debug, $parse_url, $curl_error;
     $orig_url = $url;
 
-    if (!preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png)$#i", $url) || (!empty($ai_media_titles_dl_hosts) && ($ai_media_titles_dl_hosts == "all" || in_array($parse_url['host'], $ai_media_titles_dl_hosts))) || $amt_is_gemini) { // download to check mime type, convert, create data uri if necessary. skip urls with image extension
+    if (!preg_match("#^https?://\S+?\.(?:jpe?g|png)$#i", $url) || $amt_is_gemini || $ai_media_titles_dl_hosts === 'all' || in_array($parse_url['host'] ?? '', (array)$ai_media_titles_dl_hosts, true)) { // download to check mime type, convert, create data uri if necessary. skip urls with image extension
         if (!$image_data) {
             $image_data = curlget([CURLOPT_URL => $url], ['scrapingbee_support' => 1]);
             if (empty($image_data)) {
@@ -3856,7 +3856,7 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
                 $error_msg = "API error: No response";
             }
         } else {
-            $error_code = is_array($r) ? ($r[0]->error->code ?? null) : ($r->error->code ?? null);
+            $error_code = (is_array($r) && isset($r[0])) ? ($r[0]->error->code ?? null) : ($r->error->code ?? null);
             if ($error_code === 503) {
                 $error_msg = "API error: 503 Service Unavailable";
             } else {
