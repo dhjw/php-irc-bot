@@ -64,9 +64,10 @@ $proxy_by_hosts = [
 	'links.truthsocial.com',
 ];
 
-$scrapingbee_enabled = false; // https://rapidapi.com/daolf/api/scrapingbee
-$rapidapi_key = '';
-$scrapingbee_hosts = [ // set to 'all' or an array of hostnames. may not work for sites with custom handling
+$ai_page_titles_enabled = false; // use AI to get page titles for certain hosts. gemini-only
+$ai_page_titles_key = ''; // https://aistudio.google.com/apikey
+$ai_page_titles_model = 'gemini-2.5-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models
+$ai_page_titles_hosts = [ // set to 'all' or an array of hostnames
 	'archive.today',
 	'archive.ph',
 	'archive.is',

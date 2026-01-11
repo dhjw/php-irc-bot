@@ -2580,8 +2580,8 @@ while (1) {
                         continue;
                     }
                 } else {
-                    if (!empty($scrapingbee_enabled)) {
-                        $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header], ['scrapingbee_support' => 1]);
+                    if (!empty($ai_page_titles_enabled) && ($ai_page_titles_hosts === 'all' || in_array($parse_url['host'], $ai_page_titles_hosts))) {
+                        $html = get_title_ai($u);
                     } else {
                         $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
                     }
@@ -2782,20 +2782,11 @@ while (1) {
 
 function curlget($opts = [], $more_opts = [])
 {
-    global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $max_download_size, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $rapidapi_key, $scrapingbee_enabled, $scrapingbee_hosts;
+    global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $max_download_size, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts;
 
     $parse_url = parse_url($opts[CURLOPT_URL]);
     $curl_info = [];
     $curl_error = '';
-
-    $is_scrapingbee = false;
-    if (!empty($more_opts['scrapingbee_support']) && !empty($scrapingbee_enabled) && ($scrapingbee_hosts == 'all' || in_array(parse_url($opts[CURLOPT_URL], PHP_URL_HOST), $scrapingbee_hosts))) {
-        $opts[CURLOPT_URL] = 'https://scrapingbee.p.rapidapi.com/?url=' . urlencode($opts[CURLOPT_URL]) . '&render_js=true';
-        $opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-host: scrapingbee.p.rapidapi.com';
-        $opts[CURLOPT_HTTPHEADER][] = 'x-rapidapi-key: ' . $rapidapi_key;
-        $opts[CURLOPT_TIMEOUT] = 31;
-        $is_scrapingbee = true;
-    }
 
     if ($curl_impersonate_enabled && !empty($curl_impersonate_skip_hosts) && in_array($parse_url['host'], $curl_impersonate_skip_hosts)) {
         echo "skipping impersonate for host " . $parse_url['host'] . " in \$curl_impersonate_skip_hosts\n";
@@ -2911,10 +2902,6 @@ function curlget($opts = [], $more_opts = [])
         } // str check for PHP<8.4
     }
 
-    if ($is_scrapingbee && $curl_info['RESPONSE_CODE'] <> 200) {
-        echo "ScrapingBee error: " . trim($curl_response) . "\n";
-    }
-
     // both methods
     if (parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_HOST) == 'consent.youtube.com') {
         parse_str(parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_QUERY), $q);
@@ -2941,6 +2928,29 @@ function isadmin()
     } else {
         return false;
     }
+}
+
+function get_title_ai($url)
+{
+    global $ai_page_titles_enabled, $ai_page_titles_key, $ai_page_titles_model;
+
+    if (!$ai_page_titles_enabled) return "ai disabled";
+
+    $payload = [
+        "contents" => [["parts" => [["text" => "give me the exact html title tag from the URL: $url"]]]],
+        "tools"    => [["url_context" => (object)[]]]
+    ];
+
+    $response = curlget([
+        CURLOPT_URL        => "https://generativelanguage.googleapis.com/v1beta/models/$ai_page_titles_model:generateContent?key=" . trim($ai_page_titles_key),
+        CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+        CURLOPT_POSTFIELDS => json_encode($payload),
+        CURLOPT_TIMEOUT    => 45
+    ], ["no_curl_impersonate" => 1]);
+
+    $res = json_decode($response, true);
+    $title = trim(preg_replace('/\s+/', ' ', $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? ''));
+    return $title ? "<title>$title</title>" : "extraction failed";
 }
 
 function isme()
@@ -3770,7 +3780,7 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
 
     if (!preg_match("#^https?://\S+?\.(?:jpe?g|png)$#i", $url) || $amt_is_gemini || $ai_media_titles_dl_hosts === 'all' || in_array($parse_url['host'] ?? '', (array)$ai_media_titles_dl_hosts, true)) { // download to check mime type, convert, create data uri if necessary. skip urls with image extension
         if (!$image_data) {
-            $image_data = curlget([CURLOPT_URL => $url], ['scrapingbee_support' => 1]);
+            $image_data = curlget([CURLOPT_URL => $url]);
             if (empty($image_data)) {
                 if (!empty($curl_error)) {
                     return false;
