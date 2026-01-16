@@ -2580,10 +2580,33 @@ while (1) {
                         continue;
                     }
                 } else {
-                    if (!empty($ai_page_titles_enabled) && ($ai_page_titles_hosts === 'all' || in_array($parse_url['host'], $ai_page_titles_hosts))) {
+                    if (!empty($cse_page_titles_enabled) && ($cse_page_titles_hosts === 'all' || in_array($parse_url['host'], $cse_page_titles_hosts))) {
+                        echo "Getting title via CSE\n";
+                        $html = get_title_cse($u);
+                        if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
+                            echo "Falling back to AI\n";
+                            $html = get_title_ai($u);
+                        }
+                    } elseif (!empty($ai_page_titles_enabled) && ($ai_page_titles_hosts === 'all' || in_array($parse_url['host'], $ai_page_titles_hosts))) {
+                        echo "Getting title via AI\n";
                         $html = get_title_ai($u);
+                        if (empty($html) && !empty($cse_page_titles_enabled) && $cse_page_titles_fallback) {
+                            echo "Falling back to CSE\n";
+                            $html = get_title_cse($u);
+                        }
                     } else {
+                        // standard curl fetch
                         $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
+                        if (empty($html)) {
+                            if (!empty($cse_page_titles_enabled) && $cse_page_titles_fallback) {
+                                echo "Falling back to CSE\n";
+                                $html = get_title_cse($u);
+                            }
+                            if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
+                                echo "Falling back to AI\n";
+                                $html = get_title_ai($u);
+                            }
+                        }
                     }
                 }
                 // echo "response[2048/".strlen($html)."]=".print_r(substr($html,0,2048),true)."\n";
@@ -2678,15 +2701,31 @@ while (1) {
                 $title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
                 $notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*', 'Captcha Page'];
                 foreach ($notitletitles as $ntt) {
-                    if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title)) {
-                        echo "Skipping output of title: $title\n";
-                        continue (2);
+                    if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title) || $title == get_base_domain($parse_url['host'])) {
+                        echo "Title \"$title\" looks like a non-title\n";
+                        if (!empty($cse_page_titles_enabled) && $cse_page_titles_fallback) {
+                            echo "Falling back to CSE for page title\n";
+                            $html = get_title_cse($u);
+                        }
+                        if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
+                            echo "Falling back to AI for page title\n";
+                            $html = get_title_ai($u);
+                        }
+                        if (empty($html)) {
+                            echo "Skipping output of title: $html\n";
+                            continue (2);
+                        }
+                        $dom = new DOMDocument();
+                        if (@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
+                            $list = $dom->getElementsByTagName("title");
+                            if ($list->length > 0) {
+                                $title = $list->item(0)->textContent;
+                                break;
+                            }
+                        }
                     }
                 }
-                if ($title == get_base_domain($parse_url['host'])) {
-                    echo "Skipping output of title: $title\n";
-                    continue;
-                }
+
                 foreach ($title_replaces as $k => $v) {
                     $title = str_replace($k, $v, $title);
                 }
@@ -2949,8 +2988,51 @@ function get_title_ai($url)
     ], ["no_curl_impersonate" => 1]);
 
     $res = json_decode($response, true);
+    print_r($res);
+
+    $status = $res['candidates'][0]['urlContextMetadata']['urlMetadata'][0]['urlRetrievalStatus'] ?? '';
+    if ($status === 'URL_RETRIEVAL_STATUS_ERROR') {
+        echo "Gemini said URL retrieval error\n";
+        return '';
+    }
+
     $title = trim(preg_replace('/\s+/', ' ', $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? ''));
-    return $title ? "<title>$title</title>" : "extraction failed";
+    return $title ? "<title>$title</title>" : '';
+}
+
+function get_title_cse($url)
+{
+    global $cse_page_titles_enabled, $cse_page_titles_key, $cse_page_titles_cse_id;
+
+    if (!$cse_page_titles_enabled) return "cse disabled";
+
+    $response = curlget([
+        CURLOPT_URL => "https://www.googleapis.com/customsearch/v1?" . http_build_query([
+            'q'   => $url,
+            'key' => trim($cse_page_titles_key),
+            'cx'  => trim($cse_page_titles_cse_id),
+            'num' => 5
+        ]),
+        CURLOPT_TIMEOUT => 45
+    ], ["no_curl_impersonate" => 1]);
+
+    $items = json_decode($response, true)['items'] ?? [];
+
+    foreach ($items as $item) {
+        if (rtrim($item['link'], '/') === rtrim($url, '/')) {
+            $meta = $item['pagemap']['metatags'][0] ?? [];
+
+            // Priority: metatags -> title, metatags -> og:title, item -> title
+            $rawTitle = $meta['title'] ?? $meta['og:title'] ?? $item['title'] ?? '';
+
+            if ($rawTitle) {
+                $title = trim(preg_replace('/\s+/', ' ', $rawTitle));
+                return "<title>$title</title>";
+            }
+        }
+    }
+
+    return '';
 }
 
 function isme()

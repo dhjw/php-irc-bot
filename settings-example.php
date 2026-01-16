@@ -64,25 +64,24 @@ $proxy_by_hosts = [
 	'links.truthsocial.com',
 ];
 
-$ai_page_titles_enabled = false; // use AI to get page titles for certain hosts. gemini-only
+$cse_page_titles_enabled = false; // use Google Custom Search to get page titles for certain hosts or fallback
+$cse_page_titles_key = ''; // Google API key with Custom Search enabled
+$cse_page_titles_cse_id = ''; // Custom Search Engine ID
+$cse_page_titles_hosts = []; // set to 'all' or an array of hostnames. these will only try CSE title retrieval (if no other handling). often just fallback below is fine
+$cse_page_titles_fallback = true; // use CSE title if normal title retrieval fails
+
+$ai_page_titles_enabled = false; // use AI to get page titles for certain hosts or fallback. gemini-only
 $ai_page_titles_key = ''; // https://aistudio.google.com/apikey
 $ai_page_titles_model = 'gemini-2.5-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models
-$ai_page_titles_hosts = [ // set to 'all' or an array of hostnames
-	'archive.today',
-	'archive.ph',
-	'archive.is',
-	'archive.li',
-	'archive.vn',
-	'archive.fo',
-	'archive.md',
-];
+$ai_page_titles_hosts = []; // set to 'all' or an array of hostnames. these will only try AI title retrieval (if no other handling). often just fallback below is fine
+$ai_page_titles_fallback = true; // use AI title if normal title retrieval fails
 
 $ai_media_titles_enabled = false; // direct media link summaries/titles. jpg/png/webp/avif/gif images only unless $ai_media_titles_more_types enabled below
 $ai_media_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
 $ai_media_titles_baseurl = 'https://api.openai.com/v1'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
-$ai_media_titles_model = 'gpt-4o-mini'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
+$ai_media_titles_model = 'gemini-2.5-flash-lite'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
 $ai_media_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
-$ai_media_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI ('all' required, and automatic, for gemini)
+$ai_media_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url ('all' required, and automatic, for gemini)
 	'i.4pcdn.org',
 	'static-assets-1.truthsocial.com',
 ];
