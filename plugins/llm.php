@@ -390,7 +390,7 @@ function llm_query_openai($service, $args, $images, $visual_args, $time)
     $data->messages[] = $msg_obj;
 
     if ($images) {
-        $data->model = $service["vision_model"];
+        $data->model = !empty($service["vision_model"]) ? $service["vision_model"] : $service["model"];
     } else {
         $data->model = $service["model"];
     }
