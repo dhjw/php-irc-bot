@@ -23,9 +23,9 @@ $stream_timeout = 320;
 $youtube_api_key = '';
 $short_url_service = ''; # tiny.cc, tinyurl, bit.ly, da.gd
 $short_url_token = ''; # for tiny.cc use 'username:apiKey'. can be array for rotation
-$gcloud_translate_keyfile = ''; // e.g. translate.json, per step 1 at https://cloud.google.com/translate/docs/getting-started, put in current folder
-$gcloud_translate_max_chars = 50000; // per month, see https://cloud.google.com/translate/pricing
-$auto_translate_titles = true; // auto-translate non-english link titles if page has <html lang=> attribute (requires $gcloud_translate_keyfile)
+$translate_api_key = ''; // setting this enables !tr, see https://cloud.google.com/translate/docs/setup
+$translate_max_chars = 50000; // per month, see https://cloud.google.com/translate/pricing
+$auto_translate_titles = true; // auto-translate non-english link titles if page has <html lang=> attribute (requires $translate_api_key)
 $imgur_client_id = '';
 $currencylayer_key = '';
 $omdb_key = '';
@@ -78,7 +78,7 @@ $ai_page_titles_fallback = true; // use AI title if normal title retrieval fails
 
 $ai_media_titles_enabled = false; // direct media link summaries/titles. jpg/png/webp/avif/gif images only unless $ai_media_titles_more_types enabled below
 $ai_media_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
-$ai_media_titles_baseurl = 'https://api.openai.com/v1'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
+$ai_media_titles_baseurl = 'https://generativelanguage.googleapis.com/v1beta/openai'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
 $ai_media_titles_model = 'gemini-2.5-flash-lite'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
 $ai_media_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
 $ai_media_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url ('all' required, and automatic, for gemini)

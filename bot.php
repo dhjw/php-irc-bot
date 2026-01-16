@@ -48,7 +48,7 @@ $helptxt .= !empty($omdb_key) ? " !m <query or IMDb id e.g. tt123456> - search O
 $helptxt .= !empty($currencylayer_key) ? " !cc <amount> <from_currency> <to_currency> - currency converter\n" : '';
 $helptxt .= !empty($wolfram_appid) ? " !wa <query> - query Wolfram Alpha\n" : '';
 $helptxt .= " !ud <term> [definition #] - query Urban Dictionary with optional definition number\n";
-$helptxt .= !empty($gcloud_translate_keyfile) ? " !tr <text> or e.g. !tr en-fr <text> - translate text to english or between other languages. see https://bit.ly/iso639-1\n" : '';
+$helptxt .= !empty($translate_api_key) ? " !tr <text> or e.g. !tr en-fr <text> - translate text to english or between other languages. see https://bit.ly/iso639-1\n" : '';
 $helptxt .= " !flip - flip a coin (call heads or tails first!) (uses random.org)
  !rand <min> <max> [num] - get random numbers with optional number of numbers (uses random.org)
  !8 or !8ball - magic 8-ball (modified to 50/50, uses random.org)\n";
@@ -93,7 +93,7 @@ $ircname = empty($ircname) ? $user : $ircname;
 $ident = empty($ident) ? 'bot' : $ident;
 $user_agent = empty($user_agent) ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' : $user_agent;
 $num_file_get_retries = 2;
-$gcloud_translate_max_chars = empty($gcloud_translate_max_chars) ? 50000 : $gcloud_translate_max_chars;
+$translate_max_chars = empty($translate_max_chars) ? 50000 : $translate_max_chars;
 $ignore_urls = empty($ignore_urls) ? [] : $ignore_urls;
 $ignore_urls = array_merge($ignore_urls, ['google.com/search', 'google.com/images', 'scholar.google.com']);
 $skip_dupe_output = empty($skip_dupe_output) ? false : $skip_dupe_output;
@@ -967,7 +967,7 @@ while (1) {
                     send("PRIVMSG $privto :OMDB API error.\n");
                 }
                 continue;
-            } elseif (!empty($gcloud_translate_keyfile) && ($trigger == '!tr' || $trigger == '!translate')) {
+            } elseif (!empty($translate_api_key) && ($trigger == '!tr' || $trigger == '!translate')) {
                 $words = explode(' ', $args);
                 if (strpos($words[0], '-') !== false && strlen($words[0]) == 5) {
                     list($from_lang, $to_lang) = explode('-', $words[0]);
@@ -2669,7 +2669,7 @@ while (1) {
                     }
 
                     // auto translate title
-                    if (!empty($auto_translate_titles) && !empty($gcloud_translate_keyfile) && !empty($title) && !preg_match('#//en\.|/english/|/en(?:-[a-z]{2})?/|/en(?:-[a-z]{2})?$#i', $u)) {  // skip if url indicates en as some sites dont update html tag
+                    if (!empty($auto_translate_titles) && !empty($translate_api_key) && !empty($title) && !preg_match('#//en\.|/english/|/en(?:-[a-z]{2})?/|/en(?:-[a-z]{2})?$#i', $u)) {  // skip if url indicates en as some sites dont update html tag
                         $h = $dom->getElementsByTagName('html')[0];
                         if (!empty($h) && !empty($h->attributes->getNamedItem('lang'))) {
                             $lc = strtolower(explode('-', $h->attributes->getNamedItem('lang')->value)[0]);
@@ -3691,26 +3691,22 @@ function get_true_random($min = 1, $max = 100, $num = 1)
     return str_shorten($r);
 }
 
-// Google translate, requires gcloud commandline tool installed and $gcloud_translate_keyfile set
 function google_translate($opts = ['text' => '', 'from_lang' => '', 'to_lang' => ''])
 {
-    global $datafile, $gcloud_translate_keyfile, $gcloud_translate_max_chars;
+    global $datafile, $translate_api_key, $translate_max_chars;
     // check limit, only store current year-month
     list($ym, $cnt) = json_decode(get_data('google_translate_count'), true) ?: [date("Y-m"), 0];
     if ($ym <> date("Y-m")) {
         list($ym, $cnt) = [date("Y-m"), 0];
     }
-    echo "Translating ($cnt/$gcloud_translate_max_chars" . ")...\n";
-    if ($cnt + strlen($opts['text']) > $gcloud_translate_max_chars) {
+    echo "Translating ($cnt/$translate_max_chars" . ")...\n";
+    if ($cnt + strlen($opts['text']) > $translate_max_chars) {
         $ret = new stdClass();
         $ret->error = 'Monthly translate limit exceeded';
         return $ret;
     }
-    // get a token
-    passthru("gcloud auth activate-service-account --key-file=$gcloud_translate_keyfile");
-    $token = rtrim(shell_exec("gcloud auth print-access-token"));
     $body = json_encode(['q' => $opts['text'], 'source' => $opts['from_lang'], 'target' => $opts['to_lang']]);
-    $orig_r = curlget([CURLOPT_URL => 'https://translation.googleapis.com/language/translate/v2', CURLOPT_CUSTOMREQUEST => 'POST', CURLOPT_POSTFIELDS => $body, CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $token]]);
+    $orig_r = curlget([CURLOPT_URL => 'https://translation.googleapis.com/language/translate/v2?key=' . $translate_api_key, CURLOPT_CUSTOMREQUEST => 'POST', CURLOPT_POSTFIELDS => $body, CURLOPT_HTTPHEADER => ['Content-Type: application/json']]);
     $r = json_decode($orig_r);
     if (isset($r->data->translations[0])) {
         $cnt += strlen($opts['text']);
