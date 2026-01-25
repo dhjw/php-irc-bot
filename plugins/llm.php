@@ -48,7 +48,7 @@ $llm_config = [
             "api_type" => "gemini", // use native gemini endpoint
             "key" => "", // https://aistudio.google.com/apikey
             "model" => "gemini-2.5-flash", // https://ai.google.dev/gemini-api/docs/models
-            "url_context_enabled" => true, // https://ai.google.dev/gemini-api/docs/url-context
+            "url_context_enabled" => false, // https://ai.google.dev/gemini-api/docs/url-context
             "google_search_enabled" => true, // https://ai.google.dev/gemini-api/docs/grounding
         ],
         // [
@@ -471,14 +471,11 @@ function llm_query_gemini($service, $args, $images, $visual_args, $time)
     // build request
     $data = (object)[
         'model' => $service["model"],
-        'contents' => []
-    ];
-
-    // system prompt (gemini doesnt have system role, use user)
-    $data->contents[] = (object)[
-        "role" => "user",
-        "parts" => [
-            (object)["text" => $llm_config["system_prompt"]]
+        'contents' => [],
+        'systemInstruction' => (object)[
+            'parts' => [
+                (object)['text' => $llm_config["system_prompt"]]
+            ]
         ]
     ];
 
