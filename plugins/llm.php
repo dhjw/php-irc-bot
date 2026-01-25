@@ -730,7 +730,7 @@ function llm_upload_to_github($service, $args, $content, $sources, $time)
 
         // determine github index
         $r = curlget([
-            CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/commits?path=results&per_page=1",
+            CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/commits?path=results&per_page=10",
             CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
         ], ["no_curl_impersonate" => 1]);
         $r = @json_decode($r);
@@ -740,33 +740,13 @@ function llm_upload_to_github($service, $args, $content, $sources, $time)
             continue;
         }
 
-        if (empty($r)) {
-            $github_index = 1;
-        } else {
-            $sha = $r[0]?->sha ?? null;
-            if (!$sha) {
-                echo "[llm] GitHub commits error: no last commit sha\n";
-                continue;
+        $high_index = 0;
+        foreach ($r ?: [] as $c) {
+            if (preg_match('/^Result (\d+)$/', $c->commit->message, $m)) {
+                $high_index = max($high_index, (int)$m[1]);
             }
-
-            $r = curlget([
-                CURLOPT_URL => "https://api.github.com/repos/" . $llm_config["user_repo"] . "/commits/" . $sha,
-                CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $llm_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
-            ], ["no_curl_impersonate" => 1]);
-            $r = @json_decode($r);
-
-            if ($curl_info['RESPONSE_CODE'] !== 200) {
-                echo "[llm] GitHub commit error: " . $curl_info['RESPONSE_CODE'] . " " . ($r?->message ?? "") . "\n";
-                continue;
-            }
-
-            $fn = $r?->files[0]?->filename ?? null;
-            if (empty($fn)) {
-                echo "[llm] GitHub commit error: can't find last result filename\n";
-                continue;
-            }
-            $github_index = base_convert(basename($fn), 36, 10) + 1;
         }
+        $github_index = $high_index + 1;
 
         // upload
         echo "[llm] Committing response to GitHub\n";
@@ -790,7 +770,12 @@ function llm_upload_to_github($service, $args, $content, $sources, $time)
         $r = @json_decode($r);
 
         if ($curl_info['RESPONSE_CODE'] !== 201) {
-            echo "[llm] GitHub commit error: " . $curl_info['RESPONSE_CODE'] . " " . ($r?->message ?? "") . "\n";
+            if ($curl_info['RESPONSE_CODE'] == 422 && str_contains($r?->message ?? '', 'already exists')) {
+                echo "[llm] File collision detected, retrying with new index\n";
+                usleep(rand(100000, 500000));
+            } else {
+                echo "[llm] GitHub commit error: " . $curl_info['RESPONSE_CODE'] . " " . ($r?->message ?? "") . "\n";
+            }
             continue;
         }
 
