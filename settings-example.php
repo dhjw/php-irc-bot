@@ -64,12 +64,6 @@ $proxy_by_hosts = [
 	'links.truthsocial.com',
 ];
 
-$cse_page_titles_enabled = false; // use Google Custom Search to get page titles for certain hosts or fallback
-$cse_page_titles_key = ''; // Google API key with Custom Search enabled
-$cse_page_titles_cse_id = ''; // Custom Search Engine ID
-$cse_page_titles_hosts = []; // set to 'all' or an array of hostnames. these will only try CSE title retrieval (if no other handling). often just fallback below is fine
-$cse_page_titles_fallback = true; // use CSE title if normal title retrieval fails
-
 $ai_page_titles_enabled = false; // use AI to get page titles for certain hosts or fallback. gemini-only
 $ai_page_titles_key = ''; // https://aistudio.google.com/apikey
 $ai_page_titles_model = 'gemini-2.5-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models

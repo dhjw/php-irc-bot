@@ -2580,32 +2580,15 @@ while (1) {
                         continue;
                     }
                 } else {
-                    if (!empty($cse_page_titles_enabled) && ($cse_page_titles_hosts === 'all' || in_array($parse_url['host'], $cse_page_titles_hosts))) {
-                        echo "Getting title via CSE\n";
-                        $html = get_title_cse($u);
-                        if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
-                            echo "Falling back to AI\n";
-                            $html = get_title_ai($u);
-                        }
-                    } elseif (!empty($ai_page_titles_enabled) && ($ai_page_titles_hosts === 'all' || in_array($parse_url['host'], $ai_page_titles_hosts))) {
+                    if (!empty($ai_page_titles_enabled) && ($ai_page_titles_hosts === 'all' || (is_array($ai_page_titles_hosts) && in_array($parse_url['host'], $ai_page_titles_hosts)))) {
                         echo "Getting title via AI\n";
                         $html = get_title_ai($u);
-                        if (empty($html) && !empty($cse_page_titles_enabled) && $cse_page_titles_fallback) {
-                            echo "Falling back to CSE\n";
-                            $html = get_title_cse($u);
-                        }
                     } else {
                         // standard curl fetch
                         $html = curlget([CURLOPT_URL => $u, CURLOPT_HTTPHEADER => $header]);
-                        if (empty($html)) {
-                            if (!empty($cse_page_titles_enabled) && $cse_page_titles_fallback) {
-                                echo "Falling back to CSE\n";
-                                $html = get_title_cse($u);
-                            }
-                            if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
-                                echo "Falling back to AI\n";
-                                $html = get_title_ai($u);
-                            }
+                        if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
+                            echo "Falling back to AI\n";
+                            $html = get_title_ai($u);
                         }
                     }
                 }
@@ -2699,10 +2682,6 @@ while (1) {
                 foreach ($notitletitles as $ntt) {
                     if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title) || $title == get_base_domain($parse_url['host'])) {
                         echo "Title \"$title\" looks like a non-title\n";
-                        if (!empty($cse_page_titles_enabled) && $cse_page_titles_fallback) {
-                            echo "Falling back to CSE for page title\n";
-                            $html = get_title_cse($u);
-                        }
                         if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
                             echo "Falling back to AI for page title\n";
                             $html = get_title_ai($u);
@@ -2996,40 +2975,7 @@ function get_title_ai($url)
     return $title ? "<title>$title</title>" : '';
 }
 
-function get_title_cse($url)
-{
-    global $cse_page_titles_enabled, $cse_page_titles_key, $cse_page_titles_cse_id;
 
-    if (!$cse_page_titles_enabled) return "cse disabled";
-
-    $response = curlget([
-        CURLOPT_URL => "https://www.googleapis.com/customsearch/v1?" . http_build_query([
-            'q'   => $url,
-            'key' => trim($cse_page_titles_key),
-            'cx'  => trim($cse_page_titles_cse_id),
-            'num' => 5
-        ]),
-        CURLOPT_TIMEOUT => 45
-    ], ["no_curl_impersonate" => 1]);
-
-    $items = json_decode($response, true)['items'] ?? [];
-
-    foreach ($items as $item) {
-        if (rtrim($item['link'], '/') === rtrim($url, '/')) {
-            $meta = $item['pagemap']['metatags'][0] ?? [];
-
-            // Priority: metatags -> title, metatags -> og:title, item -> title
-            $rawTitle = $meta['title'] ?? $meta['og:title'] ?? $item['title'] ?? '';
-
-            if ($rawTitle) {
-                $title = trim(preg_replace('/\s+/', ' ', $rawTitle));
-                return "<title>$title</title>";
-            }
-        }
-    }
-
-    return '';
-}
 
 function isme()
 {
