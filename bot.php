@@ -1202,7 +1202,7 @@ while (1) {
 
             for ($ui = 0; $ui < count($urls); $ui++) {
                 if (substr($orig_msg, -2) == '  ') {
-                    if($ui===0) echo "Skipping URL titles due to double space at end of line\n";
+                    if ($ui === 0) echo "Skipping URL titles due to double space at end of line\n";
                     continue;
                 }
                 $u = $urls[$ui];
@@ -1823,19 +1823,6 @@ while (1) {
                         send("PRIVMSG $channel :OMDB API error.\n");
                     }
                     continue;
-                }
-
-                // outline.com
-                if (preg_match('#(?:https://)?outline\.com/([a-zA-Z0-9]*)(?:$|\?)#', $u, $m)) {
-                    echo "outline.com url detected\n";
-                    if (!empty($m[1])) {
-                        $u = "https://outline.com/stat1k/$m[1].html";
-                        $outline = true;
-                    } else {
-                        $outline = false;
-                    }
-                } else {
-                    $outline = false;
                 }
 
                 // twitter via Nitter
@@ -2670,50 +2657,38 @@ while (1) {
                     goto invidious;
                 }
                 invidious_continue:
-                // echo "orig title= ".print_r($title,true)."\n";
-                $title = html_entity_decode($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                // strip numeric entities that don't seem to display right on IRC when converted
-                $title = preg_replace('/(&#[0-9]+;)/', '', $title);
-                $title = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $title);
-                $title = preg_replace('/\s+/', ' ', $title);
-                $tmp = " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"; // unicode spaces, ltr, rtl
-                $title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
-                $notitletitles = [$parse_url["host"], 'Imgur', 'Imgur: The .*', 'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*', 'Captcha Page'];
-                foreach ($notitletitles as $ntt) {
-                    if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($ntt)) . '$/', $title) || $title == get_base_domain($parse_url['host'])) {
-                        echo "Title \"$title\" looks like a non-title\n";
-                        if (empty($html) && !empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
-                            echo "Falling back to AI for page title\n";
-                            $html = get_title_ai($u);
-                        }
+
+                $title = title_sanitize($title, $u);
+                $title_skip = title_skip($title, $u);
+                if ($title_skip >= 1) {
+                    echo "Title \"$title\" skipped\n";
+                    $title = '';
+                }
+
+                if (empty($title) && $title_skip <> 2) {  // AI fallback
+                    if (!empty($ai_page_titles_enabled) && $ai_page_titles_fallback) {
+                        echo "Trying AI...\n";
+                        $html = get_title_ai($u);
                         if (empty($html)) {
-                            echo "Skipping output of title: $html\n";
-                            continue (2);
+                            continue;
                         }
-                        $dom = new DOMDocument();
-                        if (@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
-                            $list = $dom->getElementsByTagName("title");
-                            if ($list->length > 0) {
-                                $title = $list->item(0)->textContent;
-                                break;
+                    } elseif (empty($html)) {
+                        continue;
+                    }
+                    $dom = new DOMDocument();
+                    if (@$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html)) {
+                        $list = $dom->getElementsByTagName("title");
+                        if ($list->length > 0) {
+                            $title = $list->item(0)->textContent;
+                            $title = title_sanitize($title, $u);
+                            if (title_skip($title, $u)) {
+                                echo "Title \"$title\" skipped\n";
+                                continue;
                             }
                         }
                     }
                 }
 
-                foreach ($title_replaces as $k => $v) {
-                    $title = str_replace($k, $v, $title);
-                }
-                if (strpos($u, '//x.com/') !== false) {
-                    $title = str_replace_one(' on X: "', ': "', $title);
-                }
-                if ($title && $outline) {
-                    preg_match('#<span class="publication">.*?>(.*)›.*?</span>#', $html, $m);
-                    if (!empty($m[1])) {
-                        $title .= ' - ' . trim($m[1]);
-                    }
-                }
-                $title = str_shorten($title, 438);
                 if ($title) {
                     $title = "[ $title ]";
                     send("PRIVMSG $channel :$title_bold$title$title_bold\n");
@@ -2721,17 +2696,7 @@ while (1) {
                         add_to_title_cache($u, $title);
                     }
                 } else {
-                    if (preg_match('#^https://x.com/#', $u)) { // retry non-api X
-                        if ($u_tries < 2) {
-                            echo "No title found, retrying..\n";
-                            sleep(1);
-                            $ui--;
-                        } else {
-                            echo "No title found.\n";
-                        }
-                    } else {
-                        echo "No title found.\n";
-                    }
+                    echo "No title found.\n";
                 }
             }
         }
@@ -3315,6 +3280,45 @@ function get_base_domain($d)
         $c = substr($c, strpos($c, '.') + 1);
     }
     return $d; // not found
+}
+
+function title_sanitize($title, $url = "")
+{
+    global $title_replaces;
+    // echo "orig title= ".print_r($title,true)."\n";
+    $title = html_entity_decode($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    // strip numeric entities that don't seem to display right on IRC when converted
+    $title = preg_replace('/(&#[0-9]+;)/', '', $title);
+    $title = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $title);
+    $title = preg_replace('/\s+/', ' ', $title);
+    $tmp = " \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{200E}\u{200F}"; // unicode spaces, ltr, rtl
+    $title = preg_replace("/^[$tmp]+|[$tmp]+$/u", '', $title);
+    foreach ($title_replaces as $k => $v) {
+        $title = str_replace($k, $v, $title);
+    }
+    if (strpos($url, '//x.com/') !== false) {
+        $title = str_replace_one(' on X: "', ': "', $title);
+    }
+    $title = str_shorten($title, 438);
+    return $title;
+}
+
+function title_skip($title, $url)
+{
+    $parse_url = parse_url($url);
+    $skips = [$parse_url["host"],  'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*', 'Captcha Page', 'ERROR: The request could not be satisfied'];
+    $skips_no_fallback = ['Imgur', 'Imgur: The .*', 'Gemini - direct access to Google AI'];
+    foreach ($skips as $s) {
+        if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($s)) . '$/', $title) || $title == get_base_domain($parse_url['host'])) {
+            return 1;
+        }
+    }
+    foreach ($skips_no_fallback as $s) {
+        if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($s)) . '$/', $title)) {
+            return 2;
+        }
+    }
+    return 0;
 }
 
 function dorestart($msg, $sendquit = true)
