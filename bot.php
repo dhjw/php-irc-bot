@@ -3890,7 +3890,11 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
                 $error_msg = "API error: No response";
             }
         } else {
-            $error_code = (is_array($r) && isset($r[0])) ? ($r[0]->error->code ?? null) : ($r->error->code ?? null);
+            if (isset($r->choices[0]->finish_reason) && strpos($r->choices[0]->finish_reason, 'content_filter') !== false) {
+                echo "[get_ai_media_title] Content filtered, not retrying\n";
+                return false;
+            }
+            $error_code = (is_array($r) && isset($r[0]->error->code)) ? $r[0]->error->code : (is_object($r) ? ($r->error->code ?? null) : null);
             if ($error_code === 503) {
                 $error_msg = "API error: 503 Service Unavailable";
             } else {
