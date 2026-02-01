@@ -2922,7 +2922,7 @@ function get_title_ai($url)
     if (!$ai_page_titles_enabled) return "ai disabled";
 
     $payload = [
-        "contents" => [["parts" => [["text" => "give me the exact html title tag from the URL: $url"]]]],
+        "contents" => [["parts" => [["text" => "give me the exact html title tag from the URL. if it's not html, get the page title for the URL from google: $url"]]]],
         "tools"    => [["url_context" => (object)[]]]
     ];
 
@@ -2934,7 +2934,7 @@ function get_title_ai($url)
     ], ["no_curl_impersonate" => 1]);
 
     $res = json_decode($response, true);
-    print_r($res);
+    echo "[get_title_ai response] " . json_encode($res) . "\n";
 
     $status = $res['candidates'][0]['urlContextMetadata']['urlMetadata'][0]['urlRetrievalStatus'] ?? '';
     if ($status === 'URL_RETRIEVAL_STATUS_ERROR') {
@@ -2943,6 +2943,9 @@ function get_title_ai($url)
     }
 
     $title = trim(preg_replace('/\s+/', ' ', $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? ''));
+    if (preg_match('#^https://archive\.(today|\w\w)/#', $url)) {
+        $title = preg_replace('/ [^ ]+ Archive\.today$/i', '', $title);
+    }
     return $title ? "<title>$title</title>" : '';
 }
 
@@ -3313,7 +3316,7 @@ function title_skip($title, $url)
 {
     $parse_url = parse_url($url);
     $skips = [$parse_url["host"],  'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*', 'Captcha Page', 'ERROR: The request could not be satisfied'];
-    $skips_no_fallback = ['Imgur', 'Imgur: The .*', 'Gemini - direct access to Google AI'];
+    $skips_no_fallback = ['Imgur', 'Imgur: The .*', 'Gemini - direct access to Google AI', 'Age Verification | United States Department of Justice.*'];
     foreach ($skips as $s) {
         if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($s)) . '$/', $title) || $title == get_base_domain($parse_url['host'])) {
             return 1;
