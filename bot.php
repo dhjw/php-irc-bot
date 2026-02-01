@@ -2543,10 +2543,16 @@ while (1) {
                 }
 
                 // skips
-                $pathinfo = pathinfo($u);
-                if (in_array($pathinfo['extension'], ['gif', 'gifv', 'mp4', 'webm', 'jpg', 'jpeg', 'png', 'csv', 'pdf', 'xls', 'doc', 'txt', 'xml', 'json', 'zip', 'gz', 'bz2', '7z', 'jar'])) {
-                    echo "skipping url due to extension \"{$pathinfo['extension']}\"\n";
-                    continue;
+                $skip_exts = ['zip', 'rar', 'gz', 'bz2', '7z', 'jar', 'exe', 'msi', 'dmg', 'iso', 'bin', 'vmdk', 'vdi', 'vhd', 'img', 'db', 'sqlite', 'mdb', 'bak', 'dat', 'dll', 'so', 'lib', 'pdb', 'node', 'apk', 'ipa', 'whl'];
+                $path = strtolower(parse_url($u, PHP_URL_PATH) ?? '');
+
+                if ($path && $path !== '/') {
+                    foreach ($skip_exts as $ext) {
+                        if (str_ends_with($path, ".$ext")) {
+                            echo "skipping url due to extension \"$ext\"\n";
+                            continue 2;
+                        }
+                    }
                 }
 
                 if (!isset($header)) {
