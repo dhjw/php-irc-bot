@@ -112,6 +112,12 @@ $imgen_cf_config = [
     "github_link_titles" => true, // output titles for result page links if reposted by a user later (must be handled by this plugin as <title> is empty on initial page load)
     "convert_png_to_webp" => true, // convert png to webp (only if re-uploading and it's smaller)
     "curl_timeout" => 90, // api request timeout in seconds
+    // LLM prompt enhancement
+    "llm_enhance_enabled" => false,
+    "llm_enhance_baseurl" => "https://api.openai.com/v1",
+    "llm_enhance_model" => "gpt-4o-mini",
+    "llm_enhance_key" => "",
+    "llm_enhance_prompt" => "create a great image creation prompt up to 1000 chars from the following: `{original_prompt}`", // make sure to include {original_prompt}
 ];
 
 if ($imgen_cf_config["is_gemini"] && !$imgen_cf_config["github_enabled"]) {
@@ -151,15 +157,13 @@ function imgen_cf()
 {
     global $target, $channel, $trigger, $incnick, $args, $curl_info, $curl_error, $imgen_cf_config;
 
-    // return send("PRIVMSG $target :Disabled until we find a new model.\n");
-
     if (substr($target, 0, 1) <> "#") {
         return send("PRIVMSG $target :This command only works in $channel\n");
     }
 
     $args = trim($args);
 
-    // help
+    // 1. Help / Model List
     if (!$args || preg_match("#^(?:\.|\.?help$)#", $args)) {
         $default_trigger = trim($imgen_cf_config["default_trigger_for_img_cmd"] ?? "");
         $default_label = "random model";
@@ -181,8 +185,8 @@ function imgen_cf()
         return send("PRIVMSG $target :$txt\n");
     }
 
+    // 2. Select Model
     if ($trigger == "!img") {
-        // pick default model if configured, otherwise random
         $model = null;
         $default_trigger = trim($imgen_cf_config["default_trigger_for_img_cmd"] ?? "");
         if ($default_trigger !== "") {
@@ -192,15 +196,11 @@ function imgen_cf()
                     break;
                 }
             }
-            if (!$model) {
-                echo "[imgen-cf] Warning: default_trigger_for_img_cmd set to '$default_trigger' but matched no model; falling back to random\n";
-            }
         }
         if (!$model) {
             $model = $imgen_cf_config["models"][array_rand($imgen_cf_config["models"])];
         }
     } else {
-        // find model for trigger
         $model = null;
         foreach ($imgen_cf_config["models"] as $m) {
             if (isset($m["trigger"]) && $m["trigger"] == $trigger) {
@@ -208,28 +208,37 @@ function imgen_cf()
                 break;
             }
         }
-        if (!$model) {
-            return send("PRIVMSG $target :Error: model not found for trigger $trigger\n");
+        if (!$model) return send("PRIVMSG $target :Error: model not found\n");
+    }
+
+    $original_args = $args;
+
+    // 3. LLM Enhancement (with your original echo)
+    if ($imgen_cf_config["llm_enhance_enabled"] && !empty($imgen_cf_config["llm_enhance_key"])) {
+        $enhanced_args = $args;
+        if (preg_match('/\bpepes?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepes?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
+        $enhanced_prompt = imgen_cf_enhance_prompt($enhanced_args);
+        if ($enhanced_prompt !== false) {
+            echo "[imgen-cf-enhance] Original: $original_args\n";
+            echo "[imgen-cf-enhance] Enhanced: $enhanced_prompt\n";
+            $args = $enhanced_prompt;
         }
     }
 
-    // generate prompt according to model
-    $data = array_merge(
-        ["prompt" => $args],
-        isset($model['args']) && is_array($model['args']) ? $model['args'] : []
-    );
+    // 4. Request Preparation (with your original echo)
+    $data = array_merge(["prompt" => $args], $model['args'] ?? []);
     $data["seed"] = random_int(0, 4294967295);
 
     $headers = ["Authorization: Bearer " . $imgen_cf_config["api_token"]];
     if (isset($model["req_type"]) && $model["req_type"] == "multipart") {
         $post_fields = $data;
     } else {
-        $data = (object)$data;
-        $post_fields = json_encode($data);
+        $post_fields = json_encode((object)$data);
         $headers[] = "Content-Type: application/json";
     }
 
     echo "[imgen-cf-request] " . json_encode($data) . "\n";
+
     $r = curlget([
         CURLOPT_URL => "https://api.cloudflare.com/client/v4/accounts/" . $imgen_cf_config["account_id"] . "/ai/run/" . $model["model"],
         CURLOPT_HTTPHEADER => $headers,
@@ -238,31 +247,35 @@ function imgen_cf()
         CURLOPT_CONNECTTIMEOUT => $imgen_cf_config["curl_timeout"],
         CURLOPT_TIMEOUT => $imgen_cf_config["curl_timeout"]
     ], ["no_curl_impersonate" => 1]);
-    // echo "HEADERS=" . print_r($curl_info["HEADERS"], true) . "\n";
+
     if (empty($r)) {
-        if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-            return send("PRIVMSG $target :API error: timeout\n");
-        }
+        echo "[imgen-cf] API Error: No response. Curl Error: $curl_error\n";
         return send("PRIVMSG $target :API error: no response\n");
     }
-    // get response according to type
 
+    // 5. Decode Response (with your original binary/base64 echos)
     $finfo = new finfo(FILEINFO_MIME);
     $mime = explode(';', $finfo->buffer($r))[0];
+
     if (preg_match('/^image/', $mime)) {
-        // binary response
         $img_data = $r;
         echo "[imgen-cf-response] " . strlen($r) . " bytes... [binary image data]\n";
     } else {
-        // base64 response
         echo "[imgen-cf-response] " . substr($r, 0, 128) . "...\n";
         $r = @json_decode($r);
         if (empty($r)) {
             echo "[imgen-cf-response] error decoding json response\n";
             return send("PRIVMSG $target :Error generating image\n");
         }
-        if(isset($r->errors) && is_array($r->errors) && count($r->errors) > 0 && isset($r->errors[0]->message)) {
-            if(strpos($r->errors[0]->message, "Capacity temporarily exceeded") !== false) {
+        if (isset($r->errors) && is_array($r->errors) && count($r->errors) > 0 && isset($r->errors[0]->message)) {
+            // check for NSFW-specific error
+            foreach ($r->errors as $err) {
+                if (isset($err->message) && stripos($err->message, "NSFW") !== false) {
+                    echo "[imgen-cf-response] api error: NSFW detected\n";
+                    return send("PRIVMSG $target :Error: NSFW (try again)\n");
+                }
+            }
+            if (strpos($r->errors[0]->message, "Capacity temporarily exceeded") !== false) {
                 echo "[imgen-cf-response] capacity temporarily exceeded\n";
                 return send("PRIVMSG $target :Capacity temporarily exceeded\n");
             }
@@ -270,183 +283,97 @@ function imgen_cf()
             return send("PRIVMSG $target :Error generating image\n");
         }
         $img_data = base64_decode($r?->result?->image);
+        $mime = explode(';', $finfo->buffer($img_data))[0];
     }
 
     if (empty($img_data)) {
-        // TODO show error message
         echo "[imgen-cf-response] image data is empty, aborting\n";
         return send("PRIVMSG $target :Error generating image\n");
     }
 
-    if (!preg_match('/^image/', $mime)) {
-        // check non-binary response mime type
-        $finfo = new finfo(FILEINFO_MIME);
-        $mime = explode(';', $finfo->buffer($img_data))[0];
-        if (!preg_match('/^image/', $mime)) {
-            echo "[imgen] error: invalid image mime type $mime\n";
-            return send("PRIVMSG $target : Error generating image\n");
-        }
-    }
-
-    if($model["model"] == "@cf/stabilityai/stable-diffusion-xl-base-1.0") {
-        // check for all-black image like when you request pepe the frog :/
+    // 6. WebP Conversion
+    if ($imgen_cf_config["github_enabled"] && $imgen_cf_config["convert_png_to_webp"] && $mime == "image/png") {
         $image = @imagecreatefromstring($img_data);
         if ($image !== false) {
-            $width = imagesx($image);
-            $height = imagesy($image);
-            $isAllBlack = true;
-            for ($x = 0; $x < $width; $x++) {
-                for ($y = 0; $y < $height; $y++) {
-                    $rgb = imagecolorat($image, $x, $y);
-                    $colors = imagecolorsforindex($image, $rgb);
-                    if ($colors['red'] !== 0 || $colors['green'] !== 0 || $colors['blue'] !== 0) {
-                        $isAllBlack = false;
-                        break 2; // Exit both loops
-                    }
-                }
+            ob_start();
+            imagewebp($image, null, 95);
+            $webp_data = ob_get_clean();
+            if (strlen($webp_data) < strlen($img_data)) {
+                echo "[imgen] converted png to webp\n";
+                $img_data = $webp_data;
+                $mime = "image/webp";
             }
             imagedestroy($image);
-            if ($isAllBlack) {
-                echo "[imgen-cf] generated image is all black, aborting\n";
-                return send("PRIVMSG $target :Error generating image\n");
-            }
         }
     }
 
-    // re-uploading to github
+    // 7. GitHub Upload
     if ($imgen_cf_config["github_enabled"]) {
-
-        // convert png to webp, keep if smaller
-        if ($imgen_cf_config["convert_png_to_webp"] && $mime == "image/png") {
-            $image = @imagecreatefromstring($img_data);
-            if ($image !== false) {
-                ob_start();
-                imagewebp($image, null, 95);
-                $webp_data = ob_get_clean();
-                imagedestroy($image);
-                if (!empty($webp_data)) {
-                    $orig_size = strlen($img_data);
-                    $webp_size = strlen($webp_data);
-                    if ($webp_size < $orig_size) {
-                        echo "[imgen] converted png to webp\n";
-                        $img_data = $webp_data;
-                        $mime = "image/webp";
-                        unset($webp_data);
-                    }
-                }
-            }
-        }
-    }
-
-    // upload to github
-    if ($imgen_cf_config["github_enabled"]) {
-        // read index variable
-        $r = curlget([
-            CURLOPT_URL => "https://api.github.com/repos/" . $imgen_cf_config["user_repo"] . "/actions/variables/bot_index",
-            CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $imgen_cf_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
-        ], ["no_curl_impersonate" => 1]);
-        // echo "[DEV] github getting bot_index: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
-        $r = @json_decode($r);
-        if (empty($r)) {
-            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-                return send("PRIVMSG $target :GitHub timeout\n");
-            }
-            return send("PRIVMSG $target :GitHub error: no response\n");
-        }
-        if ($r->status == 404) {
-            echo "[imgen-cf-github] Creating bot_index\n";
-            $data = new stdClass();
-            $data->name = "bot_index";
-            $data->value = "1"; // start at 1 to avoid 0/0 results folder with single entry
-            $r = curlget([
-                CURLOPT_URL => "https://api.github.com/repos/" . $imgen_cf_config["user_repo"] . "/actions/variables",
-                CURLOPT_CUSTOMREQUEST => "POST",
-                CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $imgen_cf_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
-                CURLOPT_POSTFIELDS => json_encode($data)
-            ], ["no_curl_impersonate" => 1]);
-            // echo "[DEV] github create index r: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
-            $r = @json_decode($r);
-            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-                return send("PRIVMSG $target :GitHub timeout\n");
-            }
-            if ($curl_info["RESPONSE_CODE"] !== 201) {
-                return send("PRIVMSG $target :GitHub error creating index var\n");
-            }
-            $github_index = 1;
-        } else {
-            $github_index = $r->value;
-        }
-
-        // update bot_index variable early, to help prevent collisions with other instances and corruption if other calls fail
-        // echo "[imgen-cf-github] Updating bot_index\n";
-        $data = new stdClass();
-        $data->name = "bot_index";
-        $data->value = (string)($github_index + 1);
-        $r = curlget([
-            CURLOPT_URL => "https://api.github.com/repos/" . $imgen_cf_config["user_repo"] . "/actions/variables/bot_index",
-            CURLOPT_CUSTOMREQUEST => "PATCH",
-            CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $imgen_cf_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
-            CURLOPT_POSTFIELDS => json_encode($data)
-        ], ["no_curl_impersonate" => 1]);
-        // echo "[DEV] github update index r: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
-        $r = @json_decode($r);
-        if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-            return send("PRIVMSG $target :GitHub timeout\n");
-        }
-        if ($curl_info["RESPONSE_CODE"] !== 204) {
-            return send("PRIVMSG $target :GitHub error updating index var\n");
-        }
-
-        // prepare file for upload
         $file_data = new stdClass();
-        $file_data->p = base64_encode($args);
+        $file_data->p = base64_encode($original_args);
+        if ($original_args !== $args) $file_data->p2 = base64_encode($args);
         $file_data->m = $model["model"];
         $file_data->t = time();
         $file_data->i = "data:$mime;base64," . base64_encode($img_data);
 
-        // upload file
-        echo "[imgen-cf-github] Committing image data file\n";
-        $data = new stdClass();
-        $data->message = "Result $github_index";
-        $committer = new stdClass();
-        $committer->name = $imgen_cf_config["github_committer_name"];
-        $committer->email = $imgen_cf_config["github_committer_email"];
-        $data->committer = $committer;
-        $data->content = base64_encode(json_encode($file_data));
-        $base36_id = base_convert($github_index, 10, 36);
-        $github_path = "images/" . substr($base36_id, 0, 1) . "/" . (strlen($base36_id) > 1 ? substr($base36_id, 1, 1) : "0") . "/" . $base36_id;
-
-        $tries = 0;
+        $try = 0;
         while (true) {
-            $tries++;
-            $r = curlget([
+            $try++;
+            if ($try > 3) return send("PRIVMSG $target :GitHub upload failed\n");
+
+            // Fetch commits to determine index
+            $r_commits = curlget([
+                CURLOPT_URL => "https://api.github.com/repos/" . $imgen_cf_config["user_repo"] . "/commits?per_page=10",
+                CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $imgen_cf_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
+            ], ["no_curl_impersonate" => 1]);
+
+            $commits = @json_decode($r_commits);
+            $high_index = 0;
+            if (is_array($commits)) {
+                foreach ($commits as $c) {
+                    if (preg_match('/^Result (\d+)$/', $c->commit->message, $m)) {
+                        $high_index = max($high_index, (int)$m[1]);
+                    }
+                }
+            }
+            $github_index = $high_index + 1;
+            $base36_id = base_convert($github_index, 10, 36);
+            $github_path = "images/" . substr($base36_id, 0, 1) . "/" . (strlen($base36_id) > 1 ? substr($base36_id, 1, 1) : "0") . "/" . $base36_id;
+
+            echo "[imgen-cf-github] Committing image data file (Result $github_index)\n";
+
+            $payload = json_encode([
+                'message' => "Result $github_index",
+                'committer' => ['name' => $imgen_cf_config["github_committer_name"], 'email' => $imgen_cf_config["github_committer_email"]],
+                'content' => base64_encode(json_encode($file_data))
+            ]);
+
+            $r_put = curlget([
                 CURLOPT_URL => "https://api.github.com/repos/" . $imgen_cf_config["user_repo"] . "/contents/$github_path",
                 CURLOPT_CUSTOMREQUEST => "PUT",
                 CURLOPT_HTTPHEADER => ["Accept: application/vnd.github+json", "Authorization: Bearer " . $imgen_cf_config["github_token"], "X-GitHub-Api-Version: 2022-11-28"],
-                CURLOPT_POSTFIELDS => json_encode($data)
+                CURLOPT_POSTFIELDS => $payload
             ], ["no_curl_impersonate" => 1]);
-            echo "[DEV] github r: " . print_r([$curl_info, $curl_error, $r], true) . "\n";
-            $r = @json_decode($r);
-            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-                if ($tries < 3) continue;
-                return send("PRIVMSG $target :GitHub timeout\n");
+
+            if ($curl_info['RESPONSE_CODE'] === 201) {
+                $put_resp = json_decode($r_put);
+                $tmp = explode("/", $put_resp->content->download_url);
+                $url = "https://" . $imgen_cf_config["github_user"] . ".github.io/?" . $tmp[count($tmp) - 1];
+                return send("PRIVMSG $target :" . ($imgen_cf_config["nick_before_link"] && substr($target, 0, 1) == "#" ? "$incnick: " : "") . "$url\n");
             }
-            if ($curl_info["RESPONSE_CODE"] !== 201) {
-                if ($tries < 3) { sleep(2); continue; }
-                return send("PRIVMSG $target :GitHub error\n");
+
+            if ($curl_info['RESPONSE_CODE'] == 422) {
+                echo "[imgen-cf-github] Collision detected (422), retrying...\n";
+                usleep(rand(200000, 600000));
+                continue;
             }
-            break;
+
+            echo "[imgen-cf-github] GitHub Error: " . $r_put . "\n";
+            return send("PRIVMSG $target :GitHub error\n");
         }
-
-        // craft output github pages url
-        $tmp = explode("/", $r->content->download_url);
-        $url = "https://" . $imgen_cf_config["github_user"] . ".github.io/?" . $tmp[count($tmp) - 1];
-
-        return send("PRIVMSG $target :" . ($imgen_cf_config["nick_before_link"] && substr($target, 0, 1) == "#" ? "$incnick: " : "") . "$url\n");
     }
 
-    // if ibb and github are disabled
-    send("PRIVMSG $target :" . ($imgen_cf_config["nick_before_link"] && substr($target, 0, 1) == "#" ? "$incnick: " : "") . "Error\n");
+    send("PRIVMSG $target :Error: Storage disabled\n");
 }
 
 // link titles for plugin-created github links
@@ -485,4 +412,64 @@ if ($imgen_cf_config["github_link_titles"]) {
             }
         }
     }
+}
+
+function imgen_cf_enhance_prompt($prompt)
+{
+    global $imgen_cf_config, $curl_info, $curl_error;
+
+    $enhance_prompt = str_replace("{original_prompt}", $prompt, $imgen_cf_config["llm_enhance_prompt"]);
+
+    $data = (object)[
+        "model" => $imgen_cf_config["llm_enhance_model"],
+        "messages" => [
+            (object)[
+                "role" => "user",
+                "content" => $enhance_prompt
+            ]
+        ],
+        "temperature" => 0.7,
+        "max_tokens" => 500
+    ];
+
+    for ($try = 1; $try <= 2; $try++) {
+        if ($try > 1) {
+            echo "[imgen-cf-enhance] Retry attempt $try\n";
+            sleep(1);
+        }
+
+        $r = curlget([
+            CURLOPT_URL => $imgen_cf_config["llm_enhance_baseurl"] . "/chat/completions",
+            CURLOPT_HTTPHEADER => [
+                "Content-Type: application/json",
+                "Authorization: Bearer " . $imgen_cf_config["llm_enhance_key"]
+            ],
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => json_encode($data),
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_TIMEOUT => 30
+        ], ["no_curl_impersonate" => 1]);
+
+        $r = @json_decode($r);
+
+        if (empty($r)) {
+            echo "[imgen-cf-enhance] No response on attempt $try\n";
+            continue;
+        }
+
+        if (!empty($r->error)) {
+            echo "[imgen-cf-enhance] API error on attempt $try: " . ($r->error->message ?? json_encode($r->error)) . "\n";
+            continue;
+        }
+
+        if (isset($r->choices[0]->message->content)) {
+            $enhanced = trim($r->choices[0]->message->content);
+            return $enhanced;
+        }
+
+        echo "[imgen-cf-enhance] No content in response on attempt $try\n";
+    }
+
+    echo "[imgen-cf-enhance] Failed after 2 attempts, using original prompt\n";
+    return false;
 }
