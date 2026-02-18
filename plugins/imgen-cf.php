@@ -212,83 +212,96 @@ function imgen_cf()
     }
 
     $original_args = $args;
+    $nsfw_retries = 0;
 
-    // 3. LLM Enhancement (with your original echo)
-    if ($imgen_cf_config["llm_enhance_enabled"] && !empty($imgen_cf_config["llm_enhance_key"])) {
-        $enhanced_args = $args;
-        if (preg_match('/\bpepes?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepes?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
-        $enhanced_prompt = imgen_cf_enhance_prompt($enhanced_args);
-        if ($enhanced_prompt !== false) {
-            echo "[imgen-cf-enhance] Original: $original_args\n";
-            echo "[imgen-cf-enhance] Enhanced: $enhanced_prompt\n";
-            $args = $enhanced_prompt;
+    while (true) {
+        if ($nsfw_retries > 0) {
+            $args = $original_args;
         }
-    }
 
-    // 4. Request Preparation (with your original echo)
-    $data = array_merge(["prompt" => $args], $model['args'] ?? []);
-    $data["seed"] = random_int(0, 4294967295);
+        // 3. LLM Enhancement (with your original echo)
+        if ($imgen_cf_config["llm_enhance_enabled"] && !empty($imgen_cf_config["llm_enhance_key"])) {
+            $enhanced_args = $args;
+            if (preg_match('/\bpepes?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepes?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
+            $enhanced_prompt = imgen_cf_enhance_prompt($enhanced_args);
+            if ($enhanced_prompt !== false) {
+                echo "[imgen-cf-enhance] Original: $original_args\n";
+                echo "[imgen-cf-enhance] Enhanced: $enhanced_prompt\n";
+                $args = $enhanced_prompt;
+            }
+        }
 
-    $headers = ["Authorization: Bearer " . $imgen_cf_config["api_token"]];
-    if (isset($model["req_type"]) && $model["req_type"] == "multipart") {
-        $post_fields = $data;
-    } else {
-        $post_fields = json_encode((object)$data);
-        $headers[] = "Content-Type: application/json";
-    }
+        // 4. Request Preparation (with your original echo)
+        $data = array_merge(["prompt" => $args], $model['args'] ?? []);
+        $data["seed"] = random_int(0, 4294967295);
 
-    echo "[imgen-cf-request] " . json_encode($data) . "\n";
+        $headers = ["Authorization: Bearer " . $imgen_cf_config["api_token"]];
+        if (isset($model["req_type"]) && $model["req_type"] == "multipart") {
+            $post_fields = $data;
+        } else {
+            $post_fields = json_encode((object)$data);
+            $headers[] = "Content-Type: application/json";
+        }
 
-    $r = curlget([
-        CURLOPT_URL => "https://api.cloudflare.com/client/v4/accounts/" . $imgen_cf_config["account_id"] . "/ai/run/" . $model["model"],
-        CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_CUSTOMREQUEST => "POST",
-        CURLOPT_POSTFIELDS => $post_fields,
-        CURLOPT_CONNECTTIMEOUT => $imgen_cf_config["curl_timeout"],
-        CURLOPT_TIMEOUT => $imgen_cf_config["curl_timeout"]
-    ], ["no_curl_impersonate" => 1]);
+        echo "[imgen-cf-request] " . json_encode($data) . "\n";
 
-    if (empty($r)) {
-        echo "[imgen-cf] API Error: No response. Curl Error: $curl_error\n";
-        return send("PRIVMSG $target :API error: no response\n");
-    }
+        $r = curlget([
+            CURLOPT_URL => "https://api.cloudflare.com/client/v4/accounts/" . $imgen_cf_config["account_id"] . "/ai/run/" . $model["model"],
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => $post_fields,
+            CURLOPT_CONNECTTIMEOUT => $imgen_cf_config["curl_timeout"],
+            CURLOPT_TIMEOUT => $imgen_cf_config["curl_timeout"]
+        ], ["no_curl_impersonate" => 1]);
 
-    // 5. Decode Response (with your original binary/base64 echos)
-    $finfo = new finfo(FILEINFO_MIME);
-    $mime = explode(';', $finfo->buffer($r))[0];
-
-    if (preg_match('/^image/', $mime)) {
-        $img_data = $r;
-        echo "[imgen-cf-response] " . strlen($r) . " bytes... [binary image data]\n";
-    } else {
-        echo "[imgen-cf-response] " . substr($r, 0, 128) . "...\n";
-        $r = @json_decode($r);
         if (empty($r)) {
-            echo "[imgen-cf-response] error decoding json response\n";
-            return send("PRIVMSG $target :Error generating image\n");
+            echo "[imgen-cf] API Error: No response. Curl Error: $curl_error\n";
+            return send("PRIVMSG $target :API error: no response\n");
         }
-        if (isset($r->errors) && is_array($r->errors) && count($r->errors) > 0 && isset($r->errors[0]->message)) {
-            // check for NSFW-specific error
-            foreach ($r->errors as $err) {
-                if (isset($err->message) && stripos($err->message, "NSFW") !== false) {
-                    echo "[imgen-cf-response] api error: NSFW detected\n";
-                    return send("PRIVMSG $target :Error: NSFW (try again)\n");
-                }
-            }
-            if (strpos($r->errors[0]->message, "Capacity temporarily exceeded") !== false) {
-                echo "[imgen-cf-response] capacity temporarily exceeded\n";
-                return send("PRIVMSG $target :Capacity temporarily exceeded\n");
-            }
-            echo "[imgen-cf-response] api error: " . json_encode($r->errors) . "\n";
-            return send("PRIVMSG $target :Error generating image\n");
-        }
-        $img_data = base64_decode($r?->result?->image);
-        $mime = explode(';', $finfo->buffer($img_data))[0];
-    }
 
-    if (empty($img_data)) {
-        echo "[imgen-cf-response] image data is empty, aborting\n";
-        return send("PRIVMSG $target :Error generating image\n");
+        // 5. Decode Response (with your original binary/base64 echos)
+        $finfo = new finfo(FILEINFO_MIME);
+        $mime = explode(';', $finfo->buffer($r))[0];
+
+        if (preg_match('/^image/', $mime)) {
+            $img_data = $r;
+            echo "[imgen-cf-response] " . strlen($r) . " bytes... [binary image data]\n";
+        } else {
+            echo "[imgen-cf-response] " . substr($r, 0, 128) . "...\n";
+            $r = @json_decode($r);
+            if (empty($r)) {
+                echo "[imgen-cf-response] error decoding json response\n";
+                return send("PRIVMSG $target :Error generating image\n");
+            }
+            if (isset($r->errors) && is_array($r->errors) && count($r->errors) > 0 && isset($r->errors[0]->message)) {
+                // check for NSFW-specific error
+                foreach ($r->errors as $err) {
+                    if (isset($err->message) && stripos($err->message, "NSFW") !== false) {
+                        echo "[imgen-cf-response] api error: NSFW detected\n";
+                        if ($nsfw_retries < 2) {
+                            $nsfw_retries++;
+                            echo "[imgen-cf] Retrying ($nsfw_retries/2) with new prompt...\n";
+                            continue 2;
+                        }
+                        return send("PRIVMSG $target :Error: NSFW (try again)\n");
+                    }
+                }
+                if (strpos($r->errors[0]->message, "Capacity temporarily exceeded") !== false) {
+                    echo "[imgen-cf-response] capacity temporarily exceeded\n";
+                    return send("PRIVMSG $target :Capacity temporarily exceeded\n");
+                }
+                echo "[imgen-cf-response] api error: " . json_encode($r->errors) . "\n";
+                return send("PRIVMSG $target :Error generating image\n");
+            }
+            $img_data = base64_decode($r?->result?->image);
+            $mime = explode(';', $finfo->buffer($img_data))[0];
+        }
+
+        if (empty($img_data)) {
+            echo "[imgen-cf-response] image data is empty, aborting\n";
+            return send("PRIVMSG $target :Error generating image\n");
+        }
+        break;
     }
 
     // 6. WebP Conversion
