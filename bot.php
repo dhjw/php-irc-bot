@@ -1295,6 +1295,7 @@ while (1) {
                             } else {
                                 $o = '';
                             }
+                            if ($o == '.') $o = '';
                             if (!empty($o)) {
                                 echo "ok\n";
                                 $o = "[ $o ]";
