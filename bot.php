@@ -2525,21 +2525,12 @@ while (1) {
                 }
 
                 // skips
-                $skip_exts = ['zip', 'rar', 'gz', 'bz2', '7z', 'jar', 'exe', 'msi', 'dmg', 'iso', 'bin', 'vmdk', 'vdi', 'vhd', 'img', 'db', 'sqlite', 'mdb', 'bak', 'dat', 'dll', 'so', 'lib', 'pdb', 'node', 'apk', 'ipa', 'whl'];
-                $path = strtolower(parse_url($u, PHP_URL_PATH) ?? '');
-
-                if ($path && $path !== '/') {
-                    foreach ($skip_exts as $ext) {
-                        if (str_ends_with($path, ".$ext")) {
-                            echo "skipping url due to extension \"$ext\"\n";
-                            continue 2;
-                        }
-                    }
+                if (preg_match('/\.(?:zip|rar|gz|bz2|7z|jar|exe|msi|dmg|iso|bin|vmdk|vdi|vhd|img|db|sqlite|mdb|bak|dat|dll|so|lib|pdb|node|apk|ipa|whl)$/i', $parse_url['path'] ?? '')) {
+                    echo "skipping due to file extension\n";
+                    continue 2;
                 }
 
-                if (!isset($header)) {
-                    $header = [];
-                }
+                $header ??= [];
 
                 if (!empty($tor_enabled) && (preg_match('#^https?://.*?\.onion(?:$|/)#', $u) || !empty($tor_all))) {
                     echo "getting url title via tor\n";
