@@ -128,8 +128,8 @@ $reddit_token_expires = 0;
 $spotify_token = '';
 $spotify_token_expires = 0;
 $max_download_size ??= 26214400; // 25MiB
-$amt_is_gemini = !empty($ai_media_titles_enabled) ? substr($ai_media_titles_model, 0, 6) == 'gemini' : false;
 $amt_mt_regex = !empty($ai_media_titles_more_types) ? '|' . implode('|', explode(',', $ai_media_titles_more_types)) : '';
+$amt_supports_mp4 = !empty($ai_media_titles_more_types) && preg_match('/\bmp4\b/i', $ai_media_titles_more_types);
 
 while (1) {
     if ($connect) {
@@ -2524,25 +2524,6 @@ while (1) {
                     }
                 }
 
-                // ai media summaries
-                if (!empty($ai_media_titles_enabled)) {
-                    $amt_done = false;
-                    if (preg_match("#^https?://[^ ]+?\.(?:jpg|jpeg|png|webp|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#i", $u)) {
-                        echo "Using AI to summarize\n";
-                        $t = get_ai_media_title($u, $amt_file, $amt_mime);
-                        if (!empty($t)) {
-                            $t = str_shorten($t);
-                            $t = "[ $t ]";
-                            send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                            if ($title_cache_enabled) {
-                                add_to_title_cache($u, $t);
-                            }
-                            continue;
-                        }
-                        $amt_done = true;
-                    }
-                }
-
                 // skips
                 $skip_exts = ['zip', 'rar', 'gz', 'bz2', '7z', 'jar', 'exe', 'msi', 'dmg', 'iso', 'bin', 'vmdk', 'vdi', 'vhd', 'img', 'db', 'sqlite', 'mdb', 'bak', 'dat', 'dll', 'so', 'lib', 'pdb', 'node', 'apk', 'ipa', 'whl'];
                 $path = strtolower(parse_url($u, PHP_URL_PATH) ?? '');
@@ -2598,7 +2579,7 @@ while (1) {
                     continue;
                 }
                 // check if it's an image for ai
-                if ($ai_media_titles_enabled && !$amt_done) {
+                if ($ai_media_titles_enabled) {
                     $finfo = new finfo(FILEINFO_MIME_TYPE);
                     $mime = $finfo->buffer($html);
                     if (preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
@@ -3809,126 +3790,113 @@ function nitter_hosts_update()
 
 function get_ai_media_title($url, $image_data = null, $mime = null)
 {
-    global $ai_media_titles_key, $ai_media_titles_baseurl, $ai_media_titles_model, $ai_media_titles_prompt, $ai_media_titles_dl_hosts, $ai_media_titles_more_types, $amt_is_gemini, $amt_mt_regex, $amt_debug, $parse_url, $curl_error;
-    $orig_url = $url;
+    global $ai_media_titles_key, $ai_media_titles_baseurl, $ai_media_titles_model, $ai_media_titles_prompt, $ai_media_titles_more_types, $amt_mt_regex, $amt_supports_mp4, $parse_url, $ai_media_titles_gif_ffmpeg, $ai_media_titles_gif_cloudinary;
 
-    if (!preg_match("#^https?://\S+?\.(?:jpe?g|png)$#i", $url) || $amt_is_gemini || $ai_media_titles_dl_hosts === 'all' || in_array($parse_url['host'] ?? '', (array)$ai_media_titles_dl_hosts, true)) { // download to check mime type, convert, create data uri if necessary. skip urls with image extension
-        if (!$image_data) {
-            $image_data = curlget([CURLOPT_URL => $url]);
-            if (empty($image_data)) {
-                if (!empty($curl_error)) {
-                    return false;
-                } // curlget will output the error
-                echo "[get_ai_media_title] Failed to download, response blank\n";
-                return false;
+    if (true) {
+        if (!$image_data && !($image_data = curlget([CURLOPT_URL => $url]))) return false;
+        if (!$mime) $mime = (new finfo(FILEINFO_MIME_TYPE))->buffer($image_data);
+
+        $converted = false;
+
+        if ($mime == 'image/gif' && $amt_supports_mp4 && !empty($ai_media_titles_gif_ffmpeg) && strlen($image_data) <= 26214400) { // 25MiB so VPS doesnt die
+            echo "[get_ai_media_title] Converting GIF to MP4 with ffmpeg\n";
+            $tmp_in = tempnam(sys_get_temp_dir(), 'gif_') . '.gif';
+            $tmp_out = tempnam(sys_get_temp_dir(), 'mp4_') . '.mp4';
+            file_put_contents($tmp_in, $image_data);
+            $cmd = "ffmpeg -i " . escapeshellarg($tmp_in) . " -movflags faststart -pix_fmt yuv420p -vf " . escapeshellarg("scale=trunc(iw/2)*2:trunc(ih/2)*2") . " " . escapeshellarg($tmp_out) . " 2>&1";
+            exec($cmd, $output, $ret);
+            if ($ret === 0 && file_exists($tmp_out)) {
+                $vid_data = file_get_contents($tmp_out);
+                $vid_mime = (new finfo(FILEINFO_MIME_TYPE))->buffer($vid_data);
+                if ($vid_mime == 'video/mp4') {
+                    $image_data = $vid_data;
+                    $mime = 'video/mp4';
+                    $converted = true;
+                    echo "[get_ai_media_title] ffmpeg conversion successful\n";
+                } else {
+                    echo "[get_ai_media_title] ffmpeg returned $vid_mime instead of video/mp4\n";
+                }
+                @unlink($tmp_out);
+            } else {
+                echo "[get_ai_media_title] ffmpeg conversion failed: " . implode("\n", $output) . "\n";
+            }
+            @unlink($tmp_in);
+        }
+
+        if (!$converted && $mime == 'image/gif' && $amt_supports_mp4 && !empty($ai_media_titles_gif_cloudinary) && strlen($image_data) <= 10485760) { // 10MiB API limit
+            [$cloud, $key, $secret] = explode(':', $ai_media_titles_gif_cloudinary);
+            $ts = time();
+            $pid = "temp_bot/gif_$ts";
+
+            $p = ['eager' => 'f_mp4', 'public_id' => $pid, 'timestamp' => $ts];
+            ksort($p);
+            $sig_str = "";
+            foreach ($p as $k => $v) $sig_str .= "$k=$v&";
+            $sig = sha1(rtrim($sig_str, '&') . $secret);
+
+            echo "[get_ai_media_title cloudinary request] " . json_encode(array_merge($p, ['api_key' => $key, 'signature' => $sig, 'file' => 'base64_truncated'])) . "\n";
+
+            $raw_res = curlget([
+                CURLOPT_URL => "https://api.cloudinary.com/v1_1/$cloud/image/upload",
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => array_merge($p, ['api_key' => $key, 'signature' => $sig, 'file' => "data:image/gif;base64," . base64_encode($image_data)])
+            ], ["no_curl_impersonate" => 1]);
+
+            echo "[get_ai_media_title cloudinary response] $raw_res\n";
+            $c_res = json_decode($raw_res);
+
+            if ($vid_url = $c_res->eager[0]->secure_url ?? null) {
+                if ($vid_data = curlget([CURLOPT_URL => $vid_url])) {
+                    $vid_mime = (new finfo(FILEINFO_MIME_TYPE))->buffer($vid_data);
+                    if ($vid_mime == 'video/mp4') {
+                        $image_data = $vid_data;
+                        $mime = 'video/mp4';
+                        $converted = true;
+                    } else {
+                        echo "[get_ai_media_title] Cloudinary returned $vid_mime instead of video/mp4\n";
+                    }
+                    $d_sig = sha1("public_id=$pid&timestamp=$ts$secret");
+                    curlget([
+                        CURLOPT_URL => "https://api.cloudinary.com/v1_1/$cloud/image/destroy",
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => ['public_id' => $pid, 'timestamp' => $ts, 'api_key' => $key, 'signature' => $d_sig]
+                    ], ["no_curl_impersonate" => 1]);
+                }
             }
         }
-        if (!$mime) {
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $mime = $finfo->buffer($image_data);
-        }
-        if (!preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
-            echo "[get_ai_media_title] Only jpg, png, webp, avif, gif" . ($ai_media_titles_more_types ? str_replace('|', ', ', $amt_mt_regex) : "") . " links supported (got $mime)\n";
-            return false;
-        }
-        if (preg_match("#^\w+/(?:webp|avif|gif)#", $mime)) { // convert to png and use data-uri
-            $im = imagecreatefromstring($image_data);
-            if (!$im) {
-                echo "[get_ai_media_title] Error converting image. Corrupt image, missing php-gd or no $mime support?\n";
-                return false;
+
+        if (!$converted && strpos($mime, 'video/') === false && preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
+            if (preg_match("#^\w+/(?:webp|avif|gif)#", $mime) && ($im = @imagecreatefromstring($image_data))) {
+                if ($mime == 'image/gif' && !empty($ai_media_titles_gif_cloudinary)) echo "[get_ai_media_title] Fallback: Using first frame\n";
+                ob_start();
+                imagepng($im);
+                $image_data = ob_get_clean();
+                $mime = "image/png";
             }
-            ob_start();
-            imagepng($im);
-            $image_data = ob_get_clean();
-            $mime = "image/png";
         }
         $url = "data:$mime;base64," . base64_encode($image_data);
     }
-    $img_obj = new stdClass();
-    $img_obj->type = "image_url";
-    $i = new stdClass();
-    $i->url = $url;
-    $i->detail = "high";
-    $img_obj->image_url = $i;
-    // query
-    $data = new stdClass();
-    $data->messages = [];
-    $msg_obj = new stdClass();
-    $msg_obj->role = "user";
-    $c = new stdClass();
-    $c->type = "text";
-    $c->text = !empty($ai_media_titles_prompt) ? $ai_media_titles_prompt : 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
-    $msg_obj->content[] = $c;
-    $data->messages[] = $msg_obj;
-    // separate message for now due to gemini bug https://tinyurl.com/2v45b99a
-    $msg_obj = new stdClass();
-    $msg_obj->role = "user";
-    $msg_obj->content[] = $img_obj;
-    $data->messages[] = $msg_obj;
-    $data->model = $ai_media_titles_model;
-    $data->stream = false;
-    $data->temperature = 0;
-    $tries = 0;
-    while (true) {
-        $tries++;
-        $r = curlget([
-            CURLOPT_URL => $ai_media_titles_baseurl . "/chat/completions",
-            CURLOPT_HTTPHEADER => ["Content-Type: application/json", "Authorization: Bearer " . $ai_media_titles_key],
-            CURLOPT_CUSTOMREQUEST => "POST",
-            CURLOPT_POSTFIELDS => json_encode($data),
-            CURLOPT_CONNECTTIMEOUT => 45,
+
+    $payload = ['model' => $ai_media_titles_model, 'temperature' => 0, 'messages' => [
+        ['role' => 'user', 'content' => [['type' => 'text', 'text' => $ai_media_titles_prompt ?: 'short summary.']]],
+        ['role' => 'user', 'content' => [['type' => 'image_url', 'image_url' => ['url' => $url, 'detail' => 'high']]]]
+    ]];
+
+    for ($i = 0; $i < 3; $i++) {
+        $ai_raw = curlget([
+            CURLOPT_URL => "$ai_media_titles_baseurl/chat/completions",
+            CURLOPT_HTTPHEADER => ["Content-Type: application/json", "Authorization: Bearer " . trim($ai_media_titles_key)],
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
             CURLOPT_TIMEOUT => 45
-        ], ["no_curl_impersonate" => 1]); // image data uris too big for escapeshellarg with curl_impersonate
-        if ($amt_debug && substr($data->messages[1]->content[0]->image_url->url, 0, 5) == "data:") { // after req to avoid large copy
-            $data->messages[1]->content[0]->image_url->url = substr($data->messages[1]->content[0]->image_url->url, 0, strpos($data->messages[1]->content[0]->image_url->url, ',') + 17) . '<removed>';
-            echo "[get_ai_media_title request] " . json_encode($data) . "\n";
-        }
-        $r = @json_decode($r);
-        // success
-        if (isset($r->choices[0]->message->content)) {
-            break;
-        }
-        // error: retry or fail
-        $error_msg = '';
-        if (isset($r->error)) {
-            print_r($r);
-            $error_msg = "API error: " . ($r->error->message ?? 'Unknown');
-        } elseif (empty($r)) {
-            if (!empty($curl_error) && strpos($curl_error, "Operation timed out") !== false) {
-                $error_msg = "API error: Timeout";
-            } else {
-                $error_msg = "API error: No response";
-            }
-        } else {
-            if (isset($r->choices[0]->finish_reason) && strpos($r->choices[0]->finish_reason, 'content_filter') !== false) {
-                echo "[get_ai_media_title] Content filtered, not retrying\n";
-                return false;
-            }
-            $error_code = (is_array($r) && isset($r[0]->error->code)) ? $r[0]->error->code : (is_object($r) ? ($r->error->code ?? null) : null);
-            if ($error_code === 503) {
-                $error_msg = "API error: 503 Service Unavailable";
-            } else {
-                $error_msg = "API error: No content or unhandled";
-            }
-            echo "[get_ai_media_title response] " . json_encode($r) . "\n";
-        }
-        // 2 retries, 3 total
-        if ($tries < 3) {
-            echo "[get_ai_media_title] $error_msg. Retrying ($tries/3)...\n";
-            sleep(2);
-            continue;
-        } else {
-            echo "[get_ai_media_title] $error_msg. Max retries reached.\n";
-            return false;
-        }
+        ], ["no_curl_impersonate" => 1]);
+
+        $res = json_decode($ai_raw);
+        echo "[get_ai_media_title response] " . json_encode($res) . "\n";
+        if ($title = $res->choices[0]->message->content ?? null) return preg_replace('/\s+/', ' ', rtrim($title, '.'));
+        sleep(2);
     }
-    if ($amt_debug) {
-        echo "[get_ai_media_title response] " . json_encode($r) . "\n";
-    }
-    $title = rtrim($r->choices[0]->message->content, '.');
-    $title = str_replace(["\r\n", "\n"], ' ', $title);
-    $title = preg_replace('/\s+/', ' ', $title);
-    return $title;
+    return false;
 }
 
 // paste help if changed, return help url. uses https://paste.debian.net/rpc-interface.html

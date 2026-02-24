@@ -75,10 +75,9 @@ $ai_media_titles_key = ''; // https://platform.openai.com https://console.x.ai h
 $ai_media_titles_baseurl = 'https://generativelanguage.googleapis.com/v1beta/openai'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
 $ai_media_titles_model = 'gemini-2.5-flash-lite'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
 $ai_media_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
-$ai_media_titles_dl_hosts = [ // set to 'all' or an array of hostnames. images will be downloaded and sent as a dataURI instead of a url ('all' required, and automatic, for gemini)
-	'i.4pcdn.org',
-	'static-assets-1.truthsocial.com',
-];
+$ai_media_titles_gif_ffmpeg = false; // use ffmpeg to convert gifs to mp4 for better analysis by AI. without this, and for >10MB, the first frame is used. will only work if more_types below has mp4 and ffmpeg is installed and in PATH
+$ai_media_titles_gif_cloudinary = ''; // 'cloud_name:api_key:api_secret' for cloudinary to convert gifs to mp4 (free tier). without this, and for >10MB, the first frame is used. will only work if more_types below has mp4
+
 // gemini can do videos and more. files > $max_download_size are skipped. see e.g. https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
 // $ai_media_titles_more_types = 'x-flv,quicktime,mpeg,mpegs,mpg,mp4,webm,wmv,3gpp,x-aac,flac,mp3,m4a,mpga,opus,pcm,wav,webm,pdf,x-matroska';
 
