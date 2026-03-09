@@ -2895,7 +2895,7 @@ function get_title_ai($url)
     if (!$ai_page_titles_enabled) return "ai disabled";
 
     $payload = [
-        "contents" => [["parts" => [["text" => "give me the exact html title tag from the URL. if it's not html, get the page title for the URL from google: $url"]]]],
+        "contents" => [["parts" => [["text" => "give me the exact html title tag from the URL. if it's not html, get the page title for the URL from google. return only json with the title under key 'title': $url"]]]],
         "tools"    => [["url_context" => (object)[]]]
     ];
 
@@ -2915,7 +2915,19 @@ function get_title_ai($url)
         return '';
     }
 
-    $title = trim(preg_replace('/\s+/', ' ', $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? ''));
+    $title = '';
+    $text = $res['candidates'][0]['content']['parts'][0]['text'] ?? '';
+    if (preg_match('/```json\s*(.*?)\s*```/s', $text, $m)) {
+        $json = json_decode($m[1], true);
+    } else {
+        $json = json_decode($text, true);
+    }
+    if (is_array($json) && isset($json['title'])) {
+        $title = $json['title'];
+    }
+    if ($title === '') $title = $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? '';
+
+    $title = trim(preg_replace('/\s+/', ' ', $title));
     if (preg_match('#^https://archive\.(today|\w\w)/#', $url)) {
         $title = preg_replace('/ [^ ]+ Archive\.today$/i', '', $title);
     }
