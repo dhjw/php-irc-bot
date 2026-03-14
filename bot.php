@@ -44,7 +44,7 @@ $helptxt .= " !w <term> - search Wikipedia and output a link if something is fou
  !g- <query> - create and output a LMGTFY search link
  !i <query> - create and output a Google Images link\n";
 $helptxt .= !empty($youtube_api_key) ? " !yt <query> - search YouTube and output a link to the first result\n" : '';
-$helptxt .= !empty($omdb_key) ? " !m <query or IMDb id e.g. tt123456> - search OMDB and output media info if found\n" : '';
+$helptxt .= !empty($tmdb_read_token) ? " !m <query or IMDb id e.g. tt123456> - search TMDB and output media info if found\n" : '';
 $helptxt .= !empty($currencylayer_key) ? " !cc <amount> <from_currency> <to_currency> - currency converter\n" : '';
 $helptxt .= !empty($wolfram_appid) ? " !wa <query> - query Wolfram Alpha\n" : '';
 $helptxt .= " !ud <term> [definition #] - query Urban Dictionary with optional definition number\n";
@@ -875,97 +875,19 @@ while (1) {
                 $title = html_entity_decode($tmp->items[0]->snippet->title, ENT_QUOTES);
                 send("PRIVMSG $privto :https://youtu.be/$v | $title$ytextra\n");
                 continue;
-            } // OMDB, check for movie or series only (no episode or game)
+            } // TMDB, check for movie or tv only
             elseif ($trigger == '!m') {
-                echo "Searching OMDB.. ";
-                ini_set('default_socket_timeout', 30);
-                // by id only
-                $tmp = rtrim($ex[4]);
-                if (substr($tmp, 0, 2) == 'tt') {
-                    $cmd = "https://www.omdbapi.com/?i=" . urlencode($tmp) . "&apikey=$omdb_key";
-                    echo "by id\n";
-                    for ($i = $num_file_get_retries; $i > 0; $i--) {
-                        $tmp = curlget([CURLOPT_URL => $cmd]);
-                        $tmp = json_decode($tmp);
-                        print_r($tmp);
-                        if (!empty($tmp)) {
-                            break;
-                        } elseif ($i > 1) {
-                            sleep(1);
-                        }
-                    }
-                    if (empty($tmp)) {
-                        send("PRIVMSG $privto :OMDB API error.\n");
-                        continue;
-                    }
-                    if ($tmp->Type == 'movie') {
-                        $tmp3 = '';
-                    } else {
-                        $tmp3 = " $tmp->Type";
-                    }
-                    if ($tmp->Response == 'True') {
-                        send("PRIVMSG $privto :\xe2\x96\xb6 $tmp->Title ($tmp->Year$tmp3) | $tmp->Genre | $tmp->Actors | \"$tmp->Plot\" https://www.imdb.com/title/$tmp->imdbID/ [$tmp->imdbRating]\n");
-                    } elseif ($tmp->Response == 'False') {
-                        send("PRIVMSG $privto :$tmp->Error\n");
-                    } else {
-                        send("PRIVMSG $privto :OMDB API error.\n");
-                    }
+                if (empty($args)) {
+                    send("PRIVMSG $privto :Provide a query.\n");
                     continue;
                 }
-                // search movies and series
-                // check if final parameter is a year 1800 to 2200
-                if (count($ex) > 5) { // only if 2 words provided
-                    $tmp = rtrim($ex[count($ex) - 1]);
-                    if (is_numeric($tmp) && ($tmp > 1800 && $tmp < 2200)) {
-                        echo "year detected. appending api query and truncating msg\n";
-                        $tmp2 = "&y=$tmp";
-                        $args = substr($args, 0, strrpos($args, ' '));
-                    } else {
-                        $tmp2 = '';
-                    }
-                } else {
-                    $tmp2 = '';
-                }
-                // call with year first, without year after
-                while (1) {
-                    foreach (['movie', 'series'] as $k => $t) { // multiple calls are needed
-                        $cmd = "https://www.omdbapi.com/?apikey=$omdb_key&type=$t$tmp2&t=" . urlencode($args);
-                        echo "url=$cmd\n";
-                        for ($i = $num_file_get_retries; $i > 0; $i--) {
-                            $tmp = curlget([CURLOPT_URL => $cmd]);
-                            $tmp = json_decode($tmp);
-                            if (!empty($tmp)) {
-                                break;
-                            } elseif ($i > 1) {
-                                sleep(1);
-                            }
-                        }
-                        if (empty($tmp)) {
-                            send("PRIVMSG $privto :OMDB API error ($k)\n");
-                            continue;
-                        }
-                        if ($tmp->Response == 'True') {
-                            break (2);
-                        }
-                        //usleep(100000);
-                    }
-                    if (!empty($tmp2)) {
-                        echo "now trying without year\n";
-                        $tmp2 = '';
-                    } else {
-                        break;
-                    }
-                }
-                if ($tmp->Response == 'False') {
+                echo "Searching TMDB.. ";
+                $parts = tmdb_lookup(trim($args), false, true);
+                if (empty($parts)) {
                     send("PRIVMSG $privto :Media not found.\n");
                     continue;
                 }
-                $tmp3 = ($tmp->Type == 'movie') ? '' : " $tmp->Type";
-                if (isset($tmp->Response)) {
-                    send("PRIVMSG $privto :\xe2\x96\xb6 $tmp->Title ($tmp->Year$tmp3) | $tmp->Genre | $tmp->Actors | \"$tmp->Plot\" https://www.imdb.com/title/$tmp->imdbID/ [$tmp->imdbRating]\n");
-                } else {
-                    send("PRIVMSG $privto :OMDB API error.\n");
-                }
+                send("PRIVMSG $privto :" . implode(' | ', $parts) . "\n");
                 continue;
             } elseif (!empty($translate_api_key) && ($trigger == '!tr' || $trigger == '!translate')) {
                 $words = explode(' ', $args);
@@ -1799,30 +1721,12 @@ while (1) {
                 if (preg_match('#https?://(?:www.)?imdb.com/title/(tt\d*)/?(?:\?.*?)?$#', $u, $m)) {
                     echo "Found imdb link id $m[1]\n";
                     // same as !m by id, except no imdb link in output
-                    $cmd = "https://www.omdbapi.com/?i=" . urlencode($m[1]) . "&apikey=$omdb_key";
-                    echo "cmd=$cmd\n";
-                    for ($i = $num_file_get_retries; $i > 0; $i--) {
-                        $tmp = file_get_contents($cmd);
-                        $tmp = json_decode($tmp);
-                        print_r($tmp);
-                        if (!empty($tmp)) {
-                            break;
-                        } elseif ($i > 1) {
-                            sleep(1);
-                        }
-                    }
-                    if (empty($tmp)) {
-                        send("PRIVMSG $channel :OMDB API error.\n");
+                    $parts = tmdb_lookup($m[1], true, false);
+                    if (empty($parts)) {
+                        send("PRIVMSG $channel :TMDB API error.\n");
                         continue;
                     }
-                    $tmp3 = ($tmp->Type == 'movie') ? '' : " $tmp->Type";
-                    if ($tmp->Response == 'True') {
-                        send("PRIVMSG $channel :\xe2\x96\xb6 $tmp->Title ($tmp->Year$tmp3) | $tmp->Genre | $tmp->Actors | \"$tmp->Plot\" [$tmp->imdbRating]\n");
-                    } elseif ($tmp->Response == 'False') {
-                        send("PRIVMSG $channel :$tmp->Error\n");
-                    } else {
-                        send("PRIVMSG $channel :OMDB API error.\n");
-                    }
+                    send("PRIVMSG $channel :" . implode(' | ', $parts) . "\n");
                     continue;
                 }
 
@@ -3586,6 +3490,52 @@ function format_extract($e, $len = 280, $opts = [])
         $e = trim(trim($e, '"'));
     } // remove outside quotes because we wrap in quotes
     return $e;
+}
+
+function tmdb_lookup($q, $is_id = false, $link = true)
+{
+    global $tmdb_read_token, $baselen;
+    $req = fn($p, $a = []) => ($r = curlget([CURLOPT_URL => "https://api.themoviedb.org/3$p?" . http_build_query($a), CURLOPT_HTTPHEADER => ["Authorization: Bearer $tmdb_read_token", "accept: application/json"]])) ? json_decode($r) : null;
+
+    // 1. Resolve Winner
+    if ($is_id || preg_match('/tt\d{7,10}/', $q, $m)) {
+        $d = $req("/find/" . ($is_id ? $q : $m[0]), ['external_source' => 'imdb_id']);
+        $w = $d->movie_results[0] ?? $d->tv_results[0] ?? $d->tv_episode_results[0] ?? null;
+        if ($w) $w->media_type = isset($d->movie_results[0]) ? 'movie' : (isset($d->tv_results[0]) ? 'tv' : 'tv_episode');
+    } else {
+        $y = preg_match('/\b(\d{4})\b/', $q, $m) ? $m[1] : null;
+        $tv = preg_match('/\b(tv|tv show)\b/i', $q);
+        $mov = preg_match('/\bmovie\b/i', $q);
+        $q = trim(preg_replace(['/\b\d{4}\b/', '/\bmovie\b/i', '/\b(tv|tv show)\b/i', '/\s+/'], ['', '', '', ' '], $q));
+        $w = $req($mov ? '/search/movie' : ($tv ? '/search/tv' : '/search/multi'), ['query' => $q, ($tv ? 'first_air_date_year' : 'year') => $y])->results[0] ?? null;
+        if ($w && ($mov || $tv)) $w->media_type = $mov ? 'movie' : 'tv';
+    }
+
+    if (!$w || !in_array($t = $w->media_type, ['movie', 'tv', 'tv_episode'])) return null;
+
+    // 2. Fetch Details
+    $d = ($t == 'tv_episode') ? $req("/tv/$w->show_id", ['append_to_response' => 'credits,external_ids']) : $req("/$t/$w->id", ['append_to_response' => 'credits,external_ids']);
+    if (!$d) return null;
+
+    // 3. Build Metadata
+    $yr = fn($s, $e, $st, $p) => $s ? ($st == 'Returning Series' || $p ? "$s-" : ($e && $e != $s ? "$s-$e" : $s)) : '';
+    $y_range = ($t == 'movie') ? (substr($d->release_date ?? '', 0, 4)) : $yr(substr($d->first_air_date ?? '', 0, 4), substr($d->last_air_date ?? '', 0, 4), $d->status ?? '', !empty($d->in_production));
+
+    $res = ["▶ " . ($d->title ?? $d->name ?? $w->name) . " (" . ($t == 'movie' ? ($y_range ?: 'Movie') : "TV $y_range") . ")"];
+    if ($t == 'tv_episode') $res[] = sprintf("S%02dE%02d %s", $w->season_number, $w->episode_number, $w->name);
+    if ($g = array_column($d->genres ?? [], 'name')) $res[] = implode(', ', $g);
+    if ($c = array_slice(array_column($d->credits->cast ?? [], 'name'), 0, 3)) $res[] = implode(', ', $c);
+
+    // 4. Tail & Overview (Character Math)
+    $tail = [isset($w->vote_average) || isset($d->vote_average) ? number_format($d->vote_average ?? $w->vote_average, 1) : null];
+    if ($link) $tail[] = ($imdb = $d->imdb_id ?? $d->external_ids->imdb_id ?? null) ? "https://imdb.com/title/$imdb" : null;
+    $tail = array_filter($tail);
+
+    $ov = $w->overview ?? $d->overview ?? '';
+    $avail = 502 - $baselen - strlen(implode(' | ', array_merge($res, $tail))) - 5;
+    if ($ov) $res[] = '"' . str_shorten($ov, max(0, $avail)) . '"';
+
+    return array_merge($res, $tail);
 }
 
 function twitter_api($u, $op)

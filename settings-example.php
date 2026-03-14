@@ -28,7 +28,7 @@ $translate_max_chars = 50000; // per month, see https://cloud.google.com/transla
 $auto_translate_titles = true; // auto-translate non-english link titles if page has <html lang=> attribute (requires $translate_api_key)
 $imgur_client_id = '';
 $currencylayer_key = '';
-$omdb_key = '';
+$tmdb_read_token = ''; // https://www.themoviedb.org/settings/api
 $wolfram_appid = '';
 $twitch_client_id = ''; // https://dev.twitch.tv
 $twitch_client_secret = '';
