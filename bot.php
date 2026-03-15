@@ -411,10 +411,6 @@ while (1) {
                 $users[$id]['host'] = $ex[5];
                 $users[$id]['account'] = $a;
             }
-            if ($host_blacklist_enabled) {
-                check_blacklist($ex[4], $ex[3]);
-            }
-            // check_dnsbl($ex[7],$ex[5],true);
             continue;
         }
         if ($ex[1] == '354') { // freenode, gamesurge, libera
@@ -425,10 +421,6 @@ while (1) {
                 $users[$id]['host'] = $ex[3];
                 $users[$id]['account'] = ltrim(rtrim($ex[5]), ':');
             }
-            if ($host_blacklist_enabled) {
-                check_blacklist($ex[4], $ex[3]);
-            }
-            // check_dnsbl($ex[7],$ex[5],true);
             continue;
         }
 
@@ -465,10 +457,6 @@ while (1) {
                     send("WHO $tmpnick\n");
                 }
             }
-            if ($host_blacklist_enabled) {
-                check_blacklist($tmpnick, $tmphost);
-            }
-            // if(!isadmin()) check_dnsbl($tmpnick,$tmphost); else echo "dnsbl check skipped: isadmin\n";
             continue;
         }
 
@@ -3290,106 +3278,6 @@ function parsemask($mask)
     $tmp = explode('@', $mask);
     $tmphost = $tmp[1];
     return [$tmpnick, $tmphost];
-}
-
-// disabled
-//function check_dnsbl($nick, $host, $skip = false)
-//{
-//	global $dnsbls, $opqueue;
-//	$ignores = []; // nicks to ignore for this
-//	if (in_array($nick, $ignores)) {
-//		echo "DNSBL: ignoring nick $nick\n";
-//		return;
-//	}
-//	$dnsbls = ['all.s5h.net',
-//		'cbl.abuseat.org',
-//		'dnsbl.sorbs.net',
-//		'bl.spamcop.net'];
-//	// ip check
-//	if (substr($host, 0, 8) == 'gateway/' && strpos($host, '/ip.') !== false) $ip = gethostbyname(substr($host, strpos($host, '/ip.') + 4));
-//	else $ip = gethostbyname($host);
-//	if (filter_var($ip, FILTER_VALIDATE_IP) !== false) {
-//		echo "IP $ip detected.\n";
-//		echo ".. checking against " . count($dnsbls) . " DNSBLs\n";
-//		$rip = implode('.', array_reverse(explode('.', $ip)));
-//		foreach ($dnsbls as $bl) {
-//			$result = dns_get_record("$rip.$bl");
-//			echo "$bl result: " . print_r($result, true) . "\n";
-//			if (!empty($result)) {
-//				if (!$skip) {
-//					echo "found in dnsbl. taking action.\n";
-//					$opqueue[] = ['+b', ["*!*@$ip", "IP found in DNSBL. Please don't spam.", $nick]];
-//					getops();
-//					// timedquiet($host_blacklist_time,"*!*@$ip");
-//					dnsbl_msg($nick);
-//					return;
-//				} else echo "found in dnsbl, but action skipped.\n";
-//			} else echo "not found in dnsbl.\n";
-//		}
-//	}
-//}
-
-//function dnsbl_msg($nick)
-//{
-//	global $channel;
-//	send("PRIVMSG $nick :You have been automatically banned in $channel due to abuse from spammers. If this is a mistake please contact an op seen in /msg chanserv access $channel list\n");
-//}
-
-function check_blacklist($nick, $host)
-{
-    global $host_blacklist_strings, $host_blacklist_ips, $host_blacklist_time;
-    echo "Checking blacklist, nick: $nick host: $host\n";
-
-    // ip check
-    if (substr($host, 0, 8) == 'gateway/' && strpos($host, '/ip.') !== false) {
-        $ip = gethostbyname(substr($host, strpos($host, '/ip.') + 4));
-    } else {
-        $ip = gethostbyname($host);
-    }
-    if (filter_var($ip, FILTER_VALIDATE_IP) !== false) {
-        echo "IP $ip detected.\n";
-        echo ".. checking against " . count($host_blacklist_ips) . " IP blacklists\n";
-        foreach ($host_blacklist_ips as $ib) {
-            if (cidr_match($ip, $ib)) {
-                echo "* IP $ip matched blacklisted $ib\n";
-                // 100115 - shadowban
-                // $opqueue[]=['remove_quiet',$who,['nick'=>$thenick,'msg'=>$msg,'timed'=>$timed,'tqtime'=>$tqtime]];
-                // getops();
-                timedquiet($host_blacklist_time, "*!*@$ip");
-                blacklisted_msg($nick);
-                return;
-            }
-        }
-    }
-    // host check
-    echo ".. checking against " . count($host_blacklist_strings) . " string blacklists\n";
-    foreach ($host_blacklist_strings as $sb) {
-        if (strpos($host, $sb) !== false) {
-            echo "* Host $host matched blacklisted $sb\n";
-            timedquiet($host_blacklist_time, "*!*@$host");
-            blacklisted_msg($nick);
-            return;
-        }
-    }
-}
-
-function blacklisted_msg($nick)
-{
-    global $channel;
-    send("PRIVMSG $nick :You have been automatically quieted in $channel due to abuse. If this is a mistake please contact an op seen in /msg chanserv access $channel list\n");
-}
-
-// http://stackoverflow.com/a/594134
-function cidr_match($ip, $range)
-{
-    list($subnet, $bits) = explode('/', $range);
-    $bits = $bits ?: 32;
-    $ip = ip2long($ip);
-    $subnet = ip2long($subnet);
-    // supposedly needed for 64 bit machines per http://tinyurl.com/oxz4lrw
-    $mask = (-1 << (32 - $bits)) & ip2long('255.255.255.255');
-    $subnet &= $mask; // nb: in case the supplied subnet wasn't correctly aligned
-    return ($ip & $mask) == $subnet;
 }
 
 function timedquiet($secs, $mask)

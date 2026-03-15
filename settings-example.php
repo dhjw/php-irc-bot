@@ -97,14 +97,6 @@ $ignore_urls = [
 	// 'example.com'
 ];
 
-// blacklisted host strings and IPs. auto-quieted
-$host_blacklist_enabled = false;
-$host_blacklist_strings = [];
-$host_blacklist_ips = [ // can be CIDR ranges e.g. to blacklist entire ISPs based on https://bgp.he.net results
-	// '1.2.3.4',
-];
-$host_blacklist_time = 86400; // quiet time in seconds
-
 // flood protection
 $flood_protection_on = true;
 $flood_max_buffer_size = 20; // number of lines to keep in buffer, must meet or exceed maxes set below
