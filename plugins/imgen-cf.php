@@ -153,6 +153,7 @@ foreach ($imgen_cf_config["models"] as $model) {
         $custom_triggers[] = [$model["trigger"], "function:imgen_cf", true, $help];
     }
 }
+
 function imgen_cf()
 {
     global $target, $channel, $trigger, $incnick, $args, $curl_info, $curl_error, $imgen_cf_config;
@@ -162,6 +163,15 @@ function imgen_cf()
     }
 
     $args = trim($args);
+
+    // --- Dynamic Limit Cache Check ---
+    if (isset($imgen_cf_config["_limit_reset_ts"]) && time() < $imgen_cf_config["_limit_reset_ts"]) {
+        $now = new DateTime("now", new DateTimeZone("UTC"));
+        $reset = new DateTime("@" . $imgen_cf_config["_limit_reset_ts"]);
+        $diff = $now->diff($reset);
+        $countdown = $diff->format("%hh %im");
+        return send("PRIVMSG $target :Daily limit remains reached. Resets in $countdown (00:00 UTC)\n");
+    }
 
     // 1. Help / Model List
     if (!$args || preg_match("#^(?:\.|\.?help$)#", $args)) {
@@ -219,7 +229,7 @@ function imgen_cf()
             $args = $original_args;
         }
 
-        // 3. LLM Enhancement (with your original echo)
+        // 3. LLM Enhancement
         if ($imgen_cf_config["llm_enhance_enabled"] && !empty($imgen_cf_config["llm_enhance_key"])) {
             $enhanced_args = $args;
             if (preg_match('/\bpepes?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepes?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
@@ -231,7 +241,7 @@ function imgen_cf()
             }
         }
 
-        // 4. Request Preparation (with your original echo)
+        // 4. Request Preparation
         $data = array_merge(["prompt" => $args], $model['args'] ?? []);
         $data["seed"] = random_int(0, 4294967295);
 
@@ -259,7 +269,7 @@ function imgen_cf()
             return send("PRIVMSG $target :API error: no response\n");
         }
 
-        // 5. Decode Response (with your original binary/base64 echos)
+        // 5. Decode Response
         $finfo = new finfo(FILEINFO_MIME);
         $mime = explode(';', $finfo->buffer($r))[0];
 
@@ -276,6 +286,19 @@ function imgen_cf()
             if (isset($r->errors) && is_array($r->errors) && count($r->errors) > 0 && isset($r->errors[0]->message)) {
                 // check for NSFW-specific error
                 foreach ($r->errors as $err) {
+                    if (isset($err->message) && stripos($err->message, "used up your daily free allocation") !== false) {
+                        echo "[imgen-cf-response] api error: daily free allocation used up. Caching reset timestamp.\n";
+                        
+                        $now = new DateTime("now", new DateTimeZone("UTC"));
+                        $reset = new DateTime("tomorrow 00:00:00", new DateTimeZone("UTC"));
+                        
+                        // Set dynamic private config var
+                        $imgen_cf_config["_limit_reset_ts"] = $reset->getTimestamp();
+                        
+                        $diff = $now->diff($reset);
+                        $countdown = $diff->format("%hh %im");
+                        return send("PRIVMSG $target :Daily limit reached. Resets in $countdown (00:00 UTC)\n");
+                    }
                     if (isset($err->message) && stripos($err->message, "NSFW") !== false) {
                         echo "[imgen-cf-response] api error: NSFW detected\n";
                         if ($nsfw_retries < 2) {
@@ -389,7 +412,6 @@ function imgen_cf()
     send("PRIVMSG $target :Error: Storage disabled\n");
 }
 
-// link titles for plugin-created github links
 if ($imgen_cf_config["github_link_titles"]) {
     register_loop_function("imgen_cf_link_titles");
     function imgen_cf_link_titles()
