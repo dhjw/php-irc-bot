@@ -64,6 +64,11 @@ $proxy_by_hosts = [
 	'links.truthsocial.com',
 ];
 
+$warp_by_host_enabled = false; // use Cloudflare WARP (proxy mode) socks5 at 127.0.0.1:40000 for specific hosts
+$warp_by_hosts = [
+	// 'example.com'
+];
+
 $ai_page_titles_enabled = false; // use AI to get page titles for certain hosts or fallback. gemini-only
 $ai_page_titles_key = ''; // https://aistudio.google.com/apikey
 $ai_page_titles_model = 'gemini-2.5-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models

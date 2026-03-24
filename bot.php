@@ -2632,15 +2632,22 @@ while (1) {
 
 function curlget($opts = [], $more_opts = [])
 {
-    global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $max_download_size, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts;
+    global $custom_curl_iface, $curl_iface, $user_agent, $allow_invalid_certs, $curl_response, $curl_info, $curl_error, $max_download_size, $curl_impersonate_enabled, $curl_impersonate_binary, $curl_impersonate_skip_hosts, $proxy_by_host_enabled, $proxy_by_host_iface, $proxy_by_hosts, $warp_by_host_enabled, $warp_by_hosts;
 
     $parse_url = parse_url($opts[CURLOPT_URL]);
     $curl_info = [];
     $curl_error = '';
 
     if ($curl_impersonate_enabled && !empty($curl_impersonate_skip_hosts) && in_array($parse_url['host'], $curl_impersonate_skip_hosts)) {
-        echo "skipping impersonate for host " . $parse_url['host'] . " in \$curl_impersonate_skip_hosts\n";
+        echo "Skipping impersonate for host " . $parse_url['host'] . " in \$curl_impersonate_skip_hosts\n";
         $more_opts['no_curl_impersonate'] = true;
+    }
+
+    // cloudflare warp proxy by host (socks5 localhost:40000)
+    if (!empty($warp_by_host_enabled) && !empty($warp_by_hosts) && in_array($parse_url['host'], $warp_by_hosts) && empty($opts[CURLOPT_PROXY])) {
+        echo "Using warp socks5 proxy for host " . $parse_url['host'] . "\n";
+        $opts[CURLOPT_PROXY] = "127.0.0.1:40000";
+        $opts[CURLOPT_PROXYTYPE] = CURLPROXY_SOCKS5_HOSTNAME;
     }
 
     // determine interface
