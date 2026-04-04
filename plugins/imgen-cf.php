@@ -232,7 +232,7 @@ function imgen_cf()
         // 3. LLM Enhancement
         if ($imgen_cf_config["llm_enhance_enabled"] && !empty($imgen_cf_config["llm_enhance_key"])) {
             $enhanced_args = $args;
-            if (preg_match('/\bpepes?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepes?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
+            if (preg_match('/\bpepe\'?s?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepe\'?s?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
             $enhanced_prompt = imgen_cf_enhance_prompt($enhanced_args);
             if ($enhanced_prompt !== false) {
                 echo "[imgen-cf-enhance] Original: $original_args\n";
