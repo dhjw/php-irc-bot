@@ -2340,7 +2340,7 @@ while (1) {
                     }
                 }
 
-                // gab social
+                // gab
                 if (preg_match('#https://(?:www\.)?gab\.com/[^/]+/posts/(\d+)#', $u)) {
                     $gab_post = true;
                     $use_meta_tag = 'og:description';
@@ -2360,7 +2360,7 @@ while (1) {
                     $meta_skip_blank = true;
                 }
 
-                // msn.com articles - title via ajax
+                // msn
                 if (preg_match("#^(?:www\.)?msn\.com/.*?/ar-([^/]*)$#", $parse_url['host'] . $parse_url['path'], $m)) {
                     $r = json_decode(curlget([CURLOPT_URL => "https://assets.msn.com/content/view/v2/Detail/en-us/$m[1]"]));
                     if (isset($r->title)) {
@@ -2373,7 +2373,7 @@ while (1) {
                     }
                 }
 
-                // militarywatchmagazine.com articles - title via ajax
+                // militarywatchmagazine
                 if (preg_match("#^https?://(?:www\.)?militarywatchmagazine\.com/article/([^?\#]*)#", $u, $m)) {
                     $r = json_decode(curlget([CURLOPT_URL => "https://militarywatchmagazine.com/i_s/api/records/articles?filter=article_identifier,eq,$m[1]"]));
                     if (isset($r->records[0]->article_title)) {
@@ -2386,7 +2386,7 @@ while (1) {
                     }
                 }
 
-                // govdeals.com assets - title via ajax
+                // govdeals
                 if (preg_match('#^https?://www.govdeals.com/\w+/asset/(\d+/\d+)#', $u, $m)) {
                     $html = curlget([CURLOPT_URL => $u]); // get main js
                     if ($curl_info['RESPONSE_CODE'] == 200 && preg_match('#<script src="(main\..*?\.js)"#', $html, $m2)) {
@@ -2406,6 +2406,20 @@ while (1) {
                                 continue;
                             }
                         }
+                    }
+                }
+
+                // iranintl
+                if (preg_match('#^https?://www\.iranintl\.com/en/\d#', $u, $m)) {
+                    $html = curlget([CURLOPT_URL => $u]);
+                    $title = preg_match('/\\\"og:title\\\",\\\"content\\\":\\\"(.*?)\\\"}]/', $html, $m2) ? $m2[1] : '';
+                    if ($title) {
+                        $t = "[ " . str_shorten($title) . " ]";
+                        send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+                        if ($title_cache_enabled && strpos($u, '/liveblog/') === false) {
+                            add_to_title_cache($u, $t);
+                        }
+                        continue;
                     }
                 }
 
