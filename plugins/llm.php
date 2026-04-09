@@ -43,6 +43,21 @@ $llm_config = [
             "grok_search_safe" => false, // only safe results
         ],
         [
+            "name" => "Grok", // dupe so page shows grok logo
+            "trigger" => "!grk",
+            "api_type" => "openai",
+            "base_url" => "https://api.x.ai/v1",
+            "key" => "", // https://console.x.ai/
+            "model" => "grok-4-fast", // https://docs.x.ai/docs/models
+            "vision_model" => "grok-4-fast",
+            "system_prompt_override" => "{system_prompt}. keep answer concise and on one line.", // optional override; {system_prompt} expands to global prompt
+            "grok_search_enabled" => false, // https://docs.x.ai/docs/guides/live-search. $25 USD per 1K searches in July 2025
+            "grok_search_max_results" => 15, // 1-30
+            "grok_search_mode" => "auto", // off, auto, on
+            "grok_search_sources" => ["web", "x", "news"], // web, x, news
+            "grok_search_safe" => false, // only safe results
+        ],
+        [
             "name" => "Gemini",
             "trigger" => "!gem",
             "api_type" => "gemini", // use native gemini endpoint
@@ -108,36 +123,36 @@ function llm_success($content, $sources = [])
     return ["success" => true, "content" => $content, "sources" => $sources];
 }
 
-function llm_expire_memories($service_name, $current_time)
+function llm_expire_memories($service_idx, $current_time)
 {
     global $llm_config;
 
-    $llm_config["memory_items"][$service_name] ??= [];
+    $llm_config["memory_items"][$service_idx] ??= [];
 
-    foreach (array_reverse($llm_config["memory_items"][$service_name], true) as $k => $mi) {
+    foreach (array_reverse($llm_config["memory_items"][$service_idx], true) as $k => $mi) {
         $age = $current_time - $mi->time;
         echo "[llm-expire-check] memory $k age $age/" . $llm_config["memory_max_age"] . " ";
         if ($age > $llm_config["memory_max_age"]) {
             echo "expired\n";
-            unset($llm_config["memory_items"][$service_name][$k]);
+            unset($llm_config["memory_items"][$service_idx][$k]);
         } else {
             echo "not expired\n";
         }
     }
 
-    $llm_config["memory_items"][$service_name] = array_values($llm_config["memory_items"][$service_name]);
+    $llm_config["memory_items"][$service_idx] = array_values($llm_config["memory_items"][$service_idx]);
 }
 
-function llm_get_memories($service_name)
+function llm_get_memories($service_idx)
 {
     global $llm_config;
-    return $llm_config["memory_items"][$service_name] ?? [];
+    return $llm_config["memory_items"][$service_idx] ?? [];
 }
 
-function llm_add_memory_item($service_name, $memory_obj)
+function llm_add_memory_item($service_idx, $memory_obj)
 {
     global $llm_config;
-    $llm_config["memory_items"][$service_name][] = $memory_obj;
+    $llm_config["memory_items"][$service_idx][] = $memory_obj;
 }
 
 function llm_process_image_url($url, $api_type, $service_name)
@@ -210,16 +225,15 @@ function llm_query()
     }
 
     // find service config by trigger
-    $service = null;
-    foreach ($llm_config["services"] as $s) {
+    $service_idx = null;
+    foreach ($llm_config["services"] as $idx => $s) {
         if ($s["trigger"] == $trigger) {
-            $service = $s;
+            $service_idx = $idx;
             break;
         }
     }
-    if (!$service) {
-        return;
-    }
+    if ($service_idx === null) return;
+    $service = $llm_config["services"][$service_idx];
 
     $time = time();
     $args = trim($args);
@@ -234,7 +248,7 @@ function llm_query()
 
     if ($llm_config["memory_enabled"]) {
         if ($aa[0] == ".forget") {
-            $llm_config["memory_items"][$service["name"]] = [];
+            $llm_config["memory_items"][$service_idx] = [];
             return send("PRIVMSG $target :Memory erased\n");
         }
     }
@@ -296,9 +310,9 @@ function llm_query()
 
     // query based on api type
     if ($service["api_type"] == "gemini") {
-        $result = llm_query_gemini($service, $args, $images, $visual_args ?? null, $time);
+        $result = llm_query_gemini($service_idx, $args, $images, $visual_args ?? null, $time);
     } else {
-        $result = llm_query_openai($service, $args, $images, $visual_args ?? null, $time);
+        $result = llm_query_openai($service_idx, $args, $images, $visual_args ?? null, $time);
     }
 
     if (!$result["success"]) {
@@ -310,7 +324,7 @@ function llm_query()
 
     // append current request and response to memory
     if ($llm_config["memory_enabled"]) {
-        llm_add_to_memory($service, $args, $content, $sources, $time);
+        llm_add_to_memory($service_idx, $args, $content, $sources, $time);
     }
 
     // remove markdown for non-paste/irc output
@@ -321,7 +335,7 @@ function llm_query()
 
     // github response
     if (($llm_config["github_enabled"] && count($out_lines) >= $llm_config["github_min_lines"]) || $github_force) {
-        $github_result = llm_upload_to_github($service, $args, $content, $sources, $time);
+        $github_result = llm_upload_to_github($service_idx, $args, $content, $sources, $time);
         if ($github_result["success"]) {
             return send("PRIVMSG $target :" . ($llm_config["github_nick_before_link"] && substr($target, 0, 1) === "#" ? "$incnick: " : "") . $github_result["url"] . "\n");
         } else {
@@ -338,16 +352,18 @@ function llm_query()
     // clean up memory
     if ($llm_config["memory_enabled"]) {
         $max_items = $llm_config["memory_max_items"] * 2;
-        $llm_config["memory_items"][$service["name"]] = array_slice(
-            $llm_config["memory_items"][$service["name"]],
+        $llm_config["memory_items"][$service_idx] = array_slice(
+            $llm_config["memory_items"][$service_idx],
             -$max_items
         );
     }
 }
 
-function llm_query_openai($service, $args, $images, $visual_args, $time)
+function llm_query_openai($service_idx, $args, $images, $visual_args, $time)
 {
     global $channel, $incnick, $curl_info, $curl_error, $llm_config;
+
+    $service = $llm_config["services"][$service_idx];
 
     // build request
     $data = (object)[
@@ -355,16 +371,17 @@ function llm_query_openai($service, $args, $images, $visual_args, $time)
     ];
 
     // system prompt
+    $system_prompt = llm_get_system_prompt($service);
     $data->messages[] = (object)[
         'role' => 'system',
-        'content' => $llm_config["system_prompt"]
+        'content' => $system_prompt
     ];
 
     // add past messages
     if ($llm_config["memory_enabled"]) {
-        llm_expire_memories($service["name"], $time);
+        llm_expire_memories($service_idx, $time);
         // add memories to current request
-        foreach (llm_get_memories($service["name"]) as $mi) {
+        foreach (llm_get_memories($service_idx) as $mi) {
             $mi2 = clone $mi;
             unset($mi2->time);
             unset($mi2->grok_citations);
@@ -464,26 +481,29 @@ function llm_query_openai($service, $args, $images, $visual_args, $time)
     return llm_error($service["name"] . " API error: $error_msg");
 }
 
-function llm_query_gemini($service, $args, $images, $visual_args, $time)
+function llm_query_gemini($service_idx, $args, $images, $visual_args, $time)
 {
     global $curl_info, $curl_error, $llm_config;
 
+    $service = $llm_config["services"][$service_idx];
+
     // build request
+    $system_prompt = llm_get_system_prompt($service);
     $data = (object)[
         'model' => $service["model"],
         'contents' => [],
         'systemInstruction' => (object)[
             'parts' => [
-                (object)['text' => $llm_config["system_prompt"]]
+                (object)['text' => $system_prompt]
             ]
         ]
     ];
 
     // add past messages
     if ($llm_config["memory_enabled"]) {
-        llm_expire_memories($service["name"], $time);
+        llm_expire_memories($service_idx, $time);
         // add memories
-        foreach (llm_get_memories($service["name"]) as $mi) {
+        foreach (llm_get_memories($service_idx) as $mi) {
             $mi2 = clone $mi;
             unset($mi2->time);
             unset($mi2->sources);
@@ -607,8 +627,10 @@ function llm_query_gemini($service, $args, $images, $visual_args, $time)
     return llm_error($service["name"] . " API error: $error_msg");
 }
 
-function llm_add_to_memory($service, $args, $content, $sources, $time)
+function llm_add_to_memory($service_idx, $args, $content, $sources, $time)
 {
+    global $llm_config;
+    $service = $llm_config["services"][$service_idx];
     if ($service["api_type"] == "gemini") {
         // gemini format
         $c_obj = (object)[
@@ -618,7 +640,7 @@ function llm_add_to_memory($service, $args, $content, $sources, $time)
             ],
             'time' => $time
         ];
-        llm_add_memory_item($service["name"], $c_obj);
+        llm_add_memory_item($service_idx, $c_obj);
 
         $c_obj = (object)[
             'role' => 'model',
@@ -630,7 +652,7 @@ function llm_add_to_memory($service, $args, $content, $sources, $time)
         if (!empty($sources)) {
             $c_obj->sources = $sources;
         }
-        llm_add_memory_item($service["name"], $c_obj);
+        llm_add_memory_item($service_idx, $c_obj);
     } else {
         // openai format
         $msg_obj = (object)[
@@ -643,7 +665,7 @@ function llm_add_to_memory($service, $args, $content, $sources, $time)
             ],
             'time' => $time
         ];
-        llm_add_memory_item($service["name"], $msg_obj);
+        llm_add_memory_item($service_idx, $msg_obj);
 
         $msg_obj = (object)[
             'role' => 'assistant',
@@ -662,18 +684,20 @@ function llm_add_to_memory($service, $args, $content, $sources, $time)
                 $msg_obj->sources = $sources;
             }
         }
-        llm_add_memory_item($service["name"], $msg_obj);
+        llm_add_memory_item($service_idx, $msg_obj);
     }
 }
 
-function llm_upload_to_github($service, $args, $content, $sources, $time)
+function llm_upload_to_github($service_idx, $args, $content, $sources, $time)
 {
     global $curl_info, $llm_config;
+
+    $service = $llm_config["services"][$service_idx];
 
     // prepare file data
     if ($llm_config["memory_enabled"]) {
         $results = [];
-        foreach (llm_get_memories($service["name"]) as $mi) {
+        foreach (llm_get_memories($service_idx) as $mi) {
             if ($service["api_type"] == "gemini") {
                 $o = (object)[
                     "role" => $mi->role == "user" ? "u" : "a",
@@ -823,6 +847,18 @@ function llm_get_output_lines($content)
         }
     }
     return $out_lines;
+}
+
+function llm_get_system_prompt($service)
+{
+    global $llm_config;
+
+    $global_prompt = $llm_config["system_prompt"];
+    $override = $service["system_prompt_override"] ?? "";
+    if (!empty($override)) {
+        return str_replace("{system_prompt}", $global_prompt, $override);
+    }
+    return $global_prompt;
 }
 
 // link titles for plugin-created github links
