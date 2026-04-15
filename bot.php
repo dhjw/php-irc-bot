@@ -3698,166 +3698,129 @@ function get_x_title($u, $id)
 function get_x_bio($headers, $screen_name)
 {
     global $curl_impersonate_binary;
-    static $bio_features = null, $bio_toggles = null;
-    if (!$bio_features) {
-        $bio_features = json_encode(['hidden_profile_subscriptions_enabled' => true, 'profile_label_improvements_pcf_label_in_post_enabled' => true, 'responsive_web_profile_redirect_enabled' => false, 'rweb_tipjar_consumption_enabled' => false, 'verified_phone_label_enabled' => false, 'subscriptions_verification_info_is_identity_verified_enabled' => true, 'subscriptions_verification_info_verified_since_enabled' => true, 'highlights_tweets_tab_ui_enabled' => true, 'responsive_web_twitter_article_notes_tab_enabled' => true, 'subscriptions_feature_can_gift_premium' => true, 'creator_subscriptions_tweet_preview_api_enabled' => true, 'responsive_web_graphql_skip_user_profile_image_extensions_enabled' => false, 'responsive_web_graphql_timeline_navigation_enabled' => true]);
-        $bio_toggles = json_encode(['withPayments' => false, 'withAuxiliaryUserLabels' => true]);
+    static $features = null, $toggles = null;
+
+    if (!$features) {
+        $features = json_encode(['hidden_profile_subscriptions_enabled' => true, 'profile_label_improvements_pcf_label_in_post_enabled' => true, 'responsive_web_profile_redirect_enabled' => false, 'rweb_tipjar_consumption_enabled' => false, 'verified_phone_label_enabled' => false, 'subscriptions_verification_info_is_identity_verified_enabled' => true, 'subscriptions_verification_info_verified_since_enabled' => true, 'highlights_tweets_tab_ui_enabled' => true, 'responsive_web_twitter_article_notes_tab_enabled' => true, 'subscriptions_feature_can_gift_premium' => true, 'creator_subscriptions_tweet_preview_api_enabled' => true, 'responsive_web_graphql_skip_user_profile_image_extensions_enabled' => false, 'responsive_web_graphql_timeline_navigation_enabled' => true]);
+        $toggles = json_encode(['withPayments' => false, 'withAuxiliaryUserLabels' => true]);
     }
 
-    $variables = json_encode(['screen_name' => $screen_name, 'withGrokTranslatedBio' => true]);
-    $apiUrl = 'https://x.com/i/api/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName?variables=' . urlencode($variables) . '&features=' . urlencode($bio_features) . '&fieldToggles=' . urlencode($bio_toggles);
+    $vars = json_encode(['screen_name' => $screen_name, 'withGrokTranslatedBio' => true]);
+    $url = "https://x.com/i/api/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName?variables=" . urlencode($vars) . "&features=" . urlencode($features) . "&fieldToggles=" . urlencode($toggles);
 
-    $args = [$curl_impersonate_binary, '-s'];
-    foreach ($headers as $h) {
-        $args[] = '-H';
-        $args[] = $h;
-    }
-    $args[] = $apiUrl;
-    $r = shell_exec(implode(' ', array_map('escapeshellarg', $args)));
+    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn($h) => ['-H', $h], $headers)), [$url]);
+    $res = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
+    $json = @json_decode($res, true);
 
-    $j = @json_decode($r, true);
-    if (!$j) {
-        echo "[get_x_title] bio json decode failed\n";
-        return false;
-    }
-    if (isset($j['errors'])) {
-        echo "[get_x_title] bio API errors: " . json_encode($j['errors']) . "\n";
-        return false;
-    }
+    $res_data = $json['data']['user']['result'] ?? null;
+    $legacy = $res_data['legacy'] ?? null;
+    if (!$legacy) return false;
 
-    $user = $j['data']['user']['result']['legacy'] ?? null;
-    if (!$user) {
-        echo "[get_x_title] no user data found\n";
-        return false;
+    // Name
+    $out = $res_data['core']['name'] ?? $legacy['name'] ?? 'Unknown';
+
+    // Bio & Translation
+    $desc = $legacy['description'] ?? '';
+    $grok = $res_data['grok_translated_bio_with_availability'] ?? null;
+
+    if ($grok && ($grok['is_available'] ?? false) && ($res_data['profile_description_language'] ?? 'en') !== 'en') {
+        $desc = $grok['data']['translation'] ?? $desc;
     }
 
-    $result = $j['data']['user']['result'];
-    $t = $result['core']['name'] ?? $result['legacy']['name'] ?? $result['name'] ?? 'Unknown';
-
-    if (!empty($user['description'])) {
-        $d = $user['description'];
-        if (!empty($user['entities']['description']['urls'])) {
-            foreach ($user['entities']['description']['urls'] as $v) {
-                $d = str_replace($v['url'], "{$v['url']} (" . get_url_hint($v['expanded_url']) . ")", $d);
-            }
+    if (!empty($desc)) {
+        foreach ($legacy['entities']['description']['urls'] ?? [] as $u) {
+            $desc = str_replace($u['url'], "{$u['url']} (" . get_url_hint($u['expanded_url']) . ")", $desc);
         }
-        $d = str_replace(["\r\n", "\n", "\t"], ' ', $d);
-        $d = html_entity_decode($d, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $d = trim(preg_replace('/\s+/', ' ', $d));
-        $t .= " | $d";
+        $desc = html_entity_decode(preg_replace('/\s+/', ' ', $desc), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $out .= " | " . trim($desc);
     }
 
-    if (!empty($user['entities']['url']['urls'][0]['expanded_url'])) {
-        $url = preg_replace('#^(https?://[^/]*?)/$#', "$1", $user['entities']['url']['urls'][0]['expanded_url']);
-        $t .= " | $url";
+    // External URL
+    if ($ext_url = $legacy['entities']['url']['urls'][0]['expanded_url'] ?? null) {
+        $out .= " | " . preg_replace('#^https?://(.*?)/?$#', '$1', $ext_url);
     }
 
-    return $t;
+    return $out;
 }
 
 // Fetch X tweet
 function get_x_tweet($headers, $tweet_id)
 {
-    global $curl_impersonate_binary;
-    static $tweet_features = null, $tweet_toggles = null;
-    if (!$tweet_features) {
-        $tweet_features = json_encode(['creator_subscriptions_tweet_preview_api_enabled' => true, 'communities_web_enable_tweet_community_results_fetch' => true, 'c9s_tweet_anatomy_moderator_badge_enabled' => true, 'articles_preview_enabled' => true, 'responsive_web_edit_tweet_api_enabled' => true, 'graphql_is_translatable_rweb_tweet_is_translatable_enabled' => true, 'view_counts_everywhere_api_enabled' => true, 'longform_notetweets_consumption_enabled' => true, 'responsive_web_twitter_article_tweet_consumption_enabled' => true, 'standardized_nudges_misinfo' => true, 'tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled' => true, 'longform_notetweets_rich_text_read_enabled' => true, 'longform_notetweets_inline_media_enabled' => true, 'responsive_web_enhance_cards_enabled' => false]);
-        $tweet_toggles = json_encode(['withArticleRichContentState' => true, 'withArticlePlainText' => false, 'withGrokAnalyze' => false]);
+    global $curl_impersonate_binary, $x_auto_translate, $translate_api_key;
+    static $features = null, $toggles = null;
+
+    if (!$features) {
+        $features = json_encode(['creator_subscriptions_tweet_preview_api_enabled' => true, 'communities_web_enable_tweet_community_results_fetch' => true, 'c9s_tweet_anatomy_moderator_badge_enabled' => true, 'articles_preview_enabled' => true, 'responsive_web_edit_tweet_api_enabled' => true, 'graphql_is_translatable_rweb_tweet_is_translatable_enabled' => true, 'view_counts_everywhere_api_enabled' => true, 'longform_notetweets_consumption_enabled' => true, 'responsive_web_twitter_article_tweet_consumption_enabled' => true, 'standardized_nudges_misinfo' => true, 'tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled' => true, 'longform_notetweets_rich_text_read_enabled' => true, 'longform_notetweets_inline_media_enabled' => true, 'responsive_web_enhance_cards_enabled' => false]);
+        $toggles = json_encode(['withArticleRichContentState' => true, 'withArticlePlainText' => false, 'withGrokAnalyze' => false]);
     }
 
-    $variables = json_encode(['tweetId' => $tweet_id, 'withCommunity' => false, 'includePromotedContent' => false, 'withVoice' => false]);
-    $apiUrl = 'https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId?variables=' . urlencode($variables) . '&features=' . urlencode($tweet_features) . '&fieldToggles=' . urlencode($tweet_toggles);
+    $vars = json_encode(['tweetId' => $tweet_id, 'withCommunity' => false, 'includePromotedContent' => false, 'withVoice' => false]);
+    $url = "https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId?variables=" . urlencode($vars) . "&features=" . urlencode($features) . "&fieldToggles=" . urlencode($toggles);
 
-    $args = [$curl_impersonate_binary, '-s'];
-    foreach ($headers as $h) {
-        $args[] = '-H';
-        $args[] = $h;
-    }
-    $args[] = $apiUrl;
-    $r = shell_exec(implode(' ', array_map('escapeshellarg', $args)));
+    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn($h) => ['-H', $h], $headers)), [$url]);
+    $res = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
+    $json = @json_decode($res, true);
 
-    $j = @json_decode($r, true);
-    if (!$j) {
-        echo "[get_x_title] json decode failed\n";
-        return false;
-    }
-    if (isset($j['errors'])) {
-        echo "[get_x_title] API errors: " . json_encode($j['errors']) . "\n";
-        return false;
-    }
+    if (!$json || isset($json['errors'])) return false;
 
-    $result = $j['data']['tweetResult']['result'] ?? null;
+    $result = $json['data']['tweetResult']['result'] ?? null;
     $legacy = $result['legacy'] ?? $result['tweet']['legacy'] ?? null;
-    if (!$legacy) {
-        echo "[get_x_title] no legacy data found\n";
-        return false;
-    }
+    if (!$legacy) return false;
 
-    $user_results = $result['core']['user_results']['result'] ?? $result['tweet']['core']['user_results']['result'] ?? null;
-    $user_name = $user_results['core']['name'] ?? $user_results['legacy']['name'] ?? 'Unknown';
-    $user_screen = $user_results['core']['screen_name'] ?? $user_results['legacy']['screen_name'] ?? 'unknown';
+    $u_res = $result['core']['user_results']['result'] ?? $result['tweet']['core']['user_results']['result'] ?? null;
+    $u_name = $u_res['core']['name'] ?? $u_res['legacy']['name'] ?? 'Unknown';
+    $u_screen = $u_res['core']['screen_name'] ?? $u_res['legacy']['screen_name'] ?? 'unknown';
 
-    $text = $result['note_tweet']['note_tweet_results']['result']['text'] ?? $legacy['full_text'] ?? ''; // prefer long text
-    if (!empty($legacy['extended_entities']['media'])) {
-        foreach ($legacy['extended_entities']['media'] as $m) {
-            $text = str_replace($m['url'], '', $text);
-        }
-    }
-    $text = preg_replace('/^(?:@[^\s]+\s*)+/', '', $text); // remove @mentions
+    $text = $result['note_tweet']['note_tweet_results']['result']['text'] ?? $legacy['full_text'] ?? '';
+    foreach ($legacy['extended_entities']['media'] ?? [] as $m) $text = str_replace($m['url'], '', $text);
+
+    $text = preg_replace('/^(?:@[^\s]+\s*)+/', '', $text);
     $text = html_entity_decode(trim(preg_replace('/\s+/', ' ', $text)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-    $qh = $ql = '';
-    if (!empty($legacy['quoted_status_id_str'])) {
-        $qh = "https://x.com/$user_screen/status/{$legacy['quoted_status_id_str']}";
-        $ql = ' (re ' . make_short_url($qh) . ')';
+    $tag = '';
+    if (!empty($x_auto_translate) && !empty($translate_api_key) && ($legacy['lang'] ?? 'en') !== 'en' && preg_match('/\p{L}/u', $text)) {
+        $chunk = mb_substr($text, 0, 500);
+        $input = preg_match('/^.*[.\n]/su', $chunk, $m) ? $m[0] : $chunk;
+        $tr = google_translate(['text' => $input, 'from_lang' => '', 'to_lang' => 'en']);
+        $det = $tr->from_lang ?? $legacy['lang'];
+        if (!empty($tr->text) && !in_array($det, ['und', 'en'])) {
+            $tag = "[$det]";
+            $text = $tr->text;
+        }
+    }
+
+    $ql = '';
+    if ($qid = $legacy['quoted_status_id_str'] ?? null) {
+        $ql = ' (re ' . make_short_url("https://x.com/$u_screen/status/$qid") . ')';
     }
 
     $hl = 0;
-    if (preg_match_all('#https?://t\.co/\S+#', $text, $lm)) {
-        foreach ($lm[0] as $tco) {
-            if (!empty($qh)) {
-                $tmp = '/^' . preg_quote($tco, '/') . '|' . preg_quote($tco, '/') . '$/';
-                $fu = get_final_url($tco, ['no_body' => 1]);
-                if ($fu == $qh && preg_match($tmp, $text)) {
-                    $text = trim(preg_replace($tmp, '', $text));
-                    continue;
-                }
-            } else {
-                $fu = get_final_url($tco, ['no_body' => 1]);
-            }
-            $s = make_short_url($fu);
-            $rep = mb_strlen($s) < mb_strlen($tco) ? $s : $fu;
-            $h = get_url_hint($fu);
-            if ($h <> get_url_hint($rep)) {
-                if (mb_strlen("$rep ($h)") < mb_strlen($fu)) {
-                    $text = str_replace($tco, "$rep ($h)", $text);
-                    $hl += mb_strlen($h) + 3;
-                } else {
-                    $text = str_replace($tco, $fu, $text);
-                }
+    if (preg_match_all('#https?://t\.co/\S+#', $text, $matches)) {
+        foreach ($matches[0] as $tco) {
+            $fu = get_final_url($tco, ['no_body' => 1]);
+            $hint = get_url_hint($fu);
+            $short = make_short_url($fu);
+            $rep = mb_strlen($short) < mb_strlen($tco) ? $short : $fu;
+
+            if ($hint <> get_url_hint($rep) && mb_strlen("$rep ($hint)") < mb_strlen($tco)) {
+                $text = str_replace($tco, "$rep ($hint)", $text);
+                $hl += mb_strlen($hint) + 3;
             } else {
                 $text = str_replace($tco, $rep, $text);
             }
         }
     }
 
-    $media_str = '';
-    if (!empty($legacy['extended_entities']['media'])) {
-        $mcnt = count($legacy['extended_entities']['media']);
-        $mtyp = $legacy['extended_entities']['media'][0]['type'] ?? '';
-        $mtyp = $mtyp == 'photo' ? 'image' : ($mtyp == 'animated_gif' ? 'gif' : $mtyp);
-        $media_str = $mcnt > 0 ? ' ' . ($mcnt == 1 ? "($mtyp)" : "($mcnt {$mtyp}s)") : '';
+    $m_str = '';
+    if ($media = $legacy['extended_entities']['media'] ?? null) {
+        $cnt = count($media);
+        $type = $media[0]['type'] ?? '';
+        $type = $type == 'photo' ? 'image' : ($type == 'animated_gif' ? 'gif' : $type);
+        $m_str = " (" . ($cnt > 1 ? "$cnt {$type}s" : $type) . ")";
     }
 
-    // Calculate total space needed for media + quote
-    $reserved_space = mb_strlen($media_str) + mb_strlen($ql);
+    $suffix = ($tag ? " $tag" : "") . $m_str . $ql;
+    $out = str_shorten("$u_name: $text", mb_strlen($u_name) + 316 + $hl - mb_strlen($suffix));
 
-    // Shorten the main text to fit, leaving room for media and quotes
-    $t = "$user_name: $text";
-    $t = str_shorten($t, mb_strlen($user_name) + 316 + $hl - $reserved_space);
-
-    // Now append media and quotes (guaranteed to not be cut)
-    $t = trim($t) . $media_str . $ql;
-
-    return $t;
+    return trim($out) . $suffix;
 }
