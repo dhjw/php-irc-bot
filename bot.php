@@ -114,7 +114,6 @@ $custom_loop_functions ??= [];
 $title_cache_enabled = !empty($title_cache_enabled);
 $title_cache_size = ($title_cache_enabled && empty($title_cache_size)) ? 128 : $title_cache_size;
 $title_bold = !empty($title_bold) ? "\x02" : '';
-$twitter_nitter_instance = (!empty($twitter_nitter_enabled) && empty($twitter_nitter_instance)) ? 'https://nitter.net' : $twitter_nitter_instance;
 
 if (!empty($nitter_links_via_twitter)) {
     $nitter_hosts_time = 0;
@@ -1718,262 +1717,19 @@ while (1) {
                     continue;
                 }
 
-                // twitter via Nitter
-                if (!empty($twitter_nitter_enabled)) {
-                    // tweet
-                    if (preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:\#!/)?\w+/status(?:es)?/(\d+)#', $u, $m)) {
-                        echo "Getting tweet via Nitter\n";
-                        $html = curlget([CURLOPT_URL => "$twitter_nitter_instance/x/status/$m[1]"]);
-                        if (empty($html)) {
-                            continue;
-                        }
-                        $html = str_replace('https://twitter.com', 'https://x.com', $html);
-                        $dom = new DomDocument();
-                        @$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
-                        $f = new DomXPath($dom);
-                        // unavailable
-                        $n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'unavailable-box')]");
-                        if (!empty($n) && $n->length > 0) {
-                            if (strpos($n[0]->nodeValue, 'Age-restricted') !== false) {
-                                $t = "[ Age-restricted. Log in required. ]";
-                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                                if ($title_cache_enabled) {
-                                    add_to_title_cache($u, $t);
-                                }
-                            }
-                            echo "Tweet unavailable: {$n[0]->nodeValue}\n";
-                            continue;
-                        }
-                        $n = $f->query("//div[contains(@id, 'm')]//a[contains(@class, 'fullname')]");
-                        if (empty($n) || $n->length === 0) {
-                            echo "no fullname\n";
-                            continue;
-                        }
-                        $a = rtrim(preg_replace('#<div>.*</div>#', '', $n[0]->nodeValue));
-                        $n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'tweet-content')]");
-                        if (empty($n) || $n->length === 0) {
-                            echo "no tweet content\n";
-                            continue;
-                        }
-                        $b = $n[0]->ownerDocument->saveHTML($n[0]); // get raw html incl anchor tags
-
-                        $b = html_entity_decode($b);
-                        $b = str_replace(["\r\n", "\n", "\t", "\xC2\xA0"], ' ', $b);
-                        $b = trim(preg_replace('/\s+/', ' ', $b));
-                        $b = preg_replace('#^<div.*?>(.*)</div>$#', '$1', $b);
-                        // if has quote-link save it and purge node so its attachments arent found
-                        $ql = '';
-                        $n = $f->query("//div[contains(@id, 'm')]//a[contains(@class, 'quote-link')]");
-                        if (!empty($n) && $n->length > 0) {
-                            $qh = $n[0]->getAttribute('href');
-                            if (substr($qh, 0, 1) == '/') {
-                                $qh = "https://x.com$qh";
-                            } // may always be true
-                            $qh = preg_replace('/#m$/', '', $qh);
-                            $ql = ' (re ' . make_short_url($qh) . ')';
-                            $n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'quote quote-big')]");
-                            if (!empty($n) && $n->length > 0) {
-                                $n[0]->parentNode->removeChild($n[0]);
-                            }
-                        }
-                        // shorten and add hint for links, except ^@ and ^#
-                        $hl = 0; // track hint lengths to increase max tweet length so never cut off
-                        $b = preg_replace('#https?://nitter.net/#', 'https://x.com/', $b); // handling nitter.net is unreliable
-                        if (preg_match_all('#<a href=.*?>.*?</a>#', $b, $m) && !empty($m[0])) {
-                            foreach ($m[0] as $v) {
-                                preg_match('#<a href="([^"]*)".*>(.*)</a>#', $v, $m2); // m2[0] full anchor [1] href [2] text
-                                if (preg_match('/^[@#$]/', $m2[2])) {
-                                    $b = str_replace($m2[0], $m2[2], $b);
-                                    continue;
-                                }
-                                if (preg_match('#^https?://[^/]*/i/spaces/#', $m2[1])) {
-                                    // only link directly to space if mid-sentence as has no like, reply, etc.
-                                    if (preg_match('#' . preg_quote($m2[0]) . '$#', $b)) {
-                                        $b = preg_replace('#' . preg_quote($m2[0]) . '$#', '(space)', $b);
-                                        continue;
-                                    } else {
-                                        $m2[1] = preg_replace('#^https?://[^/]*/i/spaces/#', 'https://x.com/i/spaces/', $m2[1]);
-                                    }
-                                }
-                                if (substr($m2[1], 0, 1) == '/') {
-                                    $m2[1] = "https://x.com$m2[1]";
-                                }
-                                // shorten displayed link if possible, add hint if needed
-                                $fu = get_final_url($m2[1], ['no_body' => 1]);
-                                // if link same as quote-link and at beginning or end of tweet, remove it
-                                $tmp = '/^' . preg_quote($m2[0], '/') . '|' . preg_quote($m2[0], '/') . '$/';
-                                if ($fu == $qh && preg_match($tmp, $b)) {
-                                    $b = trim(preg_replace($tmp, '', $b));
-                                    continue;
-                                }
-                                $s = make_short_url($fu);
-                                if (mb_strlen($s) < mb_strlen($m2[1])) {
-                                    $m2[1] = $s;
-                                }
-                                $h = get_url_hint($fu);
-                                if ($h <> get_url_hint($m2[1])) {
-                                    if (mb_strlen("$m2[1] ($h)") < mb_strlen($fu)) {
-                                        $b = str_replace($m2[0], "$m2[1] ($h)", $b);
-                                        $hl += mb_strlen($h) + 3;
-                                    } else {
-                                        $b = str_replace($m2[0], $fu, $b);
-                                    } // no hint, final url < short+hint
-                                } else {
-                                    $b = str_replace($m2[0], $m2[1], $b);
-                                } // no hint, same as displayed domain
-                            }
-                        }
-                        // strip additional handles at beginning of deep replies
-                        if (substr($b, 0, 1) == '@') {
-                            $front = true;
-                            $tmps = explode(' ', $b);
-                            foreach ($tmps as $k => $tmp) {
-                                if ($k == 0) {
-                                    $tmp2 = $tmp;
-                                    continue;
-                                }
-                                if (substr($tmp, 0, 1) == '@' && $front) {
-                                    continue;
-                                }
-                                $front = false;
-                                $tmp2 .= " $tmp";
-                            }
-                            $b = $tmp2;
-                        }
-                        // pre-finalize
-                        $t = "$a: $b";
-                        $t = str_shorten($t, mb_strlen($a) + 282 + $hl);
-                        // count attachments
-                        foreach (['image', 'gif', 'video'] as $m) {
-                            $n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'attachment') and contains(@class, '$m')]");
-                            if (!empty($n) && $n->length > 0) {
-                                $t = trim($t) . ($n->length == 1 ? " ($m)" : " ($n->length {$m}s)");
-                            }
-                        }
-                        $n = $f->query("//div[contains(@id, 'm')]//div[contains(@class, 'poll')]");
-                        if (!empty($n) && $n->length > 0) {
-                            $t = trim($t) . ' (poll)';
-                        }
-                        $t .= $ql; // add quote link, no hint
-                        // finalize and output
+                // X (twitter)
+                if (!empty($x_enabled) && preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:(?:[^/]+/status(?:es)?/(\d+))|(\w+))#', $u, $m)) {
+                    $is_tweet = !empty($m[1]);
+                    $x_id = $is_tweet ? $m[1] : $m[2];
+                    echo "Getting X " . ($is_tweet ? "tweet" : "bio") . "...\n";
+                    if ($t = get_x_title($u, $x_id)) {
+                        echo "Success\n";
                         $t = "[ $t ]";
                         send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                        if ($title_cache_enabled) {
-                            add_to_title_cache($u, $t);
-                        }
-                        continue;
-                    } // bio
-                    elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
+                        if ($title_cache_enabled) add_to_title_cache($u, $t);
                         continue;
                     }
-                }
-
-                // twitter via API
-                if (!empty($twitter_consumer_key)) {
-                    // tweet
-                    if (preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:\#!/)?\w+/status(?:es)?/(\d+)#', $u, $m)) {
-                        echo "getting tweet via API.. ";
-                        if (!empty($m[1])) {
-                            $r = twitter_api('/statuses/show.json', ['id' => $m[1], 'tweet_mode' => 'extended']);
-                            if (!empty($r) && !empty($r->full_text) && !empty($r->user->name)) {
-                                $t = $r->full_text;
-                                // remove twitter media URLs that lead back to the same tweet in long tweets
-                                if (isset($r->entities->urls)) {
-                                    foreach ($r->entities->urls as $v) {
-                                        if (preg_match('#^https://(?:twitter|x)\.com/i/web/status/(\d+)#', $v->expanded_url, $m2)) {
-                                            if (!empty($m2[1]) && $m2[1] == $m[1]) {
-                                                $t = str_replace("… $v->url", ' ...', $t);
-                                                $t = trim(str_replace(" $v->url", ' ', $t));
-                                            }
-                                        }
-                                    }
-                                }
-
-                                $mcnt = 0;
-                                $mtyp = '';
-                                foreach ($r->extended_entities->media as $v) {
-                                    $mcnt++;
-                                    $mtyp = $v->type;
-                                    $t = str_replace($v->url, ' ', $t);
-                                    if (isset($v->additional_media_info->call_to_actions->watch_now)) {
-                                        $mtyp = 'video';
-                                    } // weird embeds that show as photos but are actually videos
-                                }
-                                if ($mtyp == 'photo') {
-                                    $mtyp = 'image';
-                                } elseif ($mtyp == 'animated_gif') {
-                                    $mtyp = 'gif';
-                                }
-                                if ($mcnt > 0) {
-                                    $t .= ' ' . ($mcnt == 1 ? "($mtyp)" : "($mcnt {$mtyp}s)");
-                                }
-                                // add a hint for external links
-                                foreach ($r->entities->urls as $v) {
-                                    $h = get_url_hint($v->expanded_url);
-                                    $t = str_replace($v->url, "$v->url ($h)", $t);
-                                }
-                                $t = str_replace(["\r\n", "\n", "\t"], ' ', $t);
-                                $t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                                $t = trim(preg_replace('/\s+/', ' ', $t));
-                                if (substr($t, 0, 1) == '@') { // strip additional handles at beginning of deep replies
-                                    $front = true;
-                                    $tmps = explode(' ', $t);
-                                    foreach ($tmps as $k => $tmp) {
-                                        if ($k == 0) {
-                                            $tmp2 = $tmp;
-                                            continue;
-                                        }
-                                        if (substr($tmp, 0, 1) == '@' && $front) {
-                                            continue;
-                                        }
-                                        $front = false;
-                                        $tmp2 .= " $tmp";
-                                    }
-                                    $t = $tmp2;
-                                }
-                                $t = '[ ' . str_shorten("{$r->user->name}: $t") . ' ]';
-                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                            } else {
-                                echo "failed. result=" . print_r($r, true);
-                                if (!empty($r->errors) && ($r->errors[0]->code == 8 || $r->errors[0]->code == 144)) {
-                                    send("PRIVMSG $channel :Tweet not found.\n");
-                                }
-                            }
-                            continue; // always abort, won't be a non-tweet URL
-                        }
-                        // bio
-                    } elseif (preg_match("#^https?://(?:mobile\.)?(?:twitter|x)\.com/(\w*)(?:[?\#].*)?$#", $u, $m)) {
-                        echo "getting twitter bio via API.. ";
-                        if (!empty($m[1])) {
-                            $r = twitter_api('/users/show.json', ['screen_name' => $m[1]]);
-                            if (!empty($r) && empty($r->errors)) {
-                                echo "ok\n";
-                                $t = $r->name;
-                                if (!empty($r->description)) {
-                                    $d = $r->description;
-                                    foreach ($r->entities->description->urls as $v) {
-                                        $h = get_url_hint($v->expanded_url);
-                                        $d = str_replace($v->url, "$v->url ($h)", $d);
-                                    }
-                                    $d = str_replace(["\r\n", "\n", "\t"], ' ', $d);
-                                    $d = html_entity_decode($d, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                                    $d = trim(preg_replace('/\s+/', ' ', $d));
-                                    $t .= " | $d";
-                                }
-                                if (!empty($r->url)) {
-                                    $u = $r->entities->url->urls[0]->expanded_url;
-                                    $u = preg_replace('#^(https?://[^/]*?)/$#', "$1", $u); // strip trailing slash on domain-only links
-                                    $t .= " | $u";
-                                }
-                                $t = "[ $t ]";
-                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                                continue; // only abort if found, else might be a non-profile URL
-                            } else {
-                                echo "failed. result=" . print_r($r, true);
-                                // send("PRIVMSG $channel :Twitter user not found.\n");
-                            }
-                        }
-                    }
+                    echo "Failed\n";
                 }
 
                 // truth social
@@ -3447,39 +3203,6 @@ function tmdb_lookup($q, $is_id = false, $link = true)
     return array_merge($res, $tail);
 }
 
-function twitter_api($u, $op)
-{ // https://stackoverflow.com/a/12939923
-    global $twitter_consumer_key, $twitter_consumer_secret, $twitter_access_token, $twitter_access_token_secret;
-    // init params
-    $u = "https://api.twitter.com/1.1$u";
-    $p = array_merge(['oauth_consumer_key' => $twitter_consumer_key, 'oauth_nonce' => uniqid('', true), 'oauth_signature_method' => 'HMAC-SHA1', 'oauth_token' => $twitter_access_token, 'oauth_timestamp' => time(), 'oauth_version' => '1.0'], $op);
-    // build base string
-    $t = [];
-    ksort($p);
-    foreach ($p as $k => $v) {
-        $t[] = "$k=" . rawurlencode($v);
-    }
-    $b = 'GET&' . rawurlencode($u) . '&' . rawurlencode(implode('&', $t));
-    // sign
-    $k = rawurlencode($twitter_consumer_secret) . '&' . rawurlencode($twitter_access_token_secret);
-    $s = base64_encode(hash_hmac('sha1', $b, $k, true));
-    $p['oauth_signature'] = $s;
-    // build header
-    $t = 'Authorization: OAuth ';
-    $t2 = [];
-    foreach ($p as $k => $v) {
-        $t2[] = "$k=\"" . rawurlencode($v) . "\"";
-    }
-    $t .= implode(', ', $t2);
-    $h = [$t];
-    // request
-    $t = [];
-    foreach ($op as $k => $v) {
-        $t[] = "$k=" . rawurlencode($v);
-    }
-    return @json_decode(curlget([CURLOPT_URL => "$u?" . implode('&', $t), CURLOPT_HTTPHEADER => $h]));
-}
-
 function get_true_random($min = 1, $max = 100, $num = 1)
 {
     $max = ((int)$max >= 1) ? (int)$max : 100;
@@ -3912,4 +3635,229 @@ function upgrade($upgrade_version)
         @rename('cookiefile.txt', 'cookies.txt');
         set_data('upgrade_version', 1, '*');
     }
+}
+
+// Get headers for X API requests with cached guest token
+function get_x_headers()
+{
+    global $x_auth_token, $x_ct0, $curl_impersonate_binary;
+    static $guest_token_expires = 0, $cached_guest_token = null, $cached_guest_csrf = null;
+
+    $bearer = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+    $base_headers = [
+        "Authorization: Bearer $bearer",
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type: application/json",
+        "Accept: */*",
+        "x-twitter-active-user: yes"
+    ];
+
+    if (!empty($x_auth_token) && !empty($x_ct0)) {
+        echo "[get_x_title] using user auth\n";
+        return [...$base_headers, "Cookie: auth_token=$x_auth_token; ct0=$x_ct0", "x-csrf-token: $x_ct0"];
+    }
+
+    $now = time();
+    if ($cached_guest_token && $guest_token_expires > $now) {
+        echo "[get_x_title] using cached guest token\n";
+        return [...$base_headers, "Cookie: guest_id=v1%3A$cached_guest_token; ct0=$cached_guest_csrf", "x-csrf-token: $cached_guest_csrf", "x-guest-token: $cached_guest_token"];
+    }
+
+    echo "[get_x_title] fetching new guest token\n";
+    $args = [$curl_impersonate_binary, '-s', '-X', 'POST'];
+    foreach ($base_headers as $h) {
+        $args[] = '-H';
+        $args[] = $h;
+    }
+    $args[] = 'https://api.x.com/1.1/guest/activate.json';
+    $guest_token = @json_decode(shell_exec(implode(' ', array_map('escapeshellarg', $args))), true)['guest_token'] ?? null;
+    if (!$guest_token) {
+        echo "[get_x_title] failed to get guest token\n";
+        return false;
+    }
+
+    $cached_guest_token = $guest_token;
+    $cached_guest_csrf = bin2hex(random_bytes(16));
+    $guest_token_expires = $now + 18000;
+    return [...$base_headers, "Cookie: guest_id=v1%3A$cached_guest_token; ct0=$cached_guest_csrf", "x-csrf-token: $cached_guest_csrf", "x-guest-token: $cached_guest_token"];
+}
+
+function get_x_title($u, $id)
+{
+    $headers = get_x_headers();
+    if (!$headers) return false;
+    if (!ctype_digit($id)) {
+        echo "[get_x_title] fetching bio for @$id\n";
+        return get_x_bio($headers, $id);
+    }
+    echo "[get_x_title] fetching tweet $id\n";
+    return get_x_tweet($headers, $id);
+}
+
+// Fetch X user bio/profile
+function get_x_bio($headers, $screen_name)
+{
+    global $curl_impersonate_binary;
+    static $bio_features = null, $bio_toggles = null;
+    if (!$bio_features) {
+        $bio_features = json_encode(['hidden_profile_subscriptions_enabled' => true, 'profile_label_improvements_pcf_label_in_post_enabled' => true, 'responsive_web_profile_redirect_enabled' => false, 'rweb_tipjar_consumption_enabled' => false, 'verified_phone_label_enabled' => false, 'subscriptions_verification_info_is_identity_verified_enabled' => true, 'subscriptions_verification_info_verified_since_enabled' => true, 'highlights_tweets_tab_ui_enabled' => true, 'responsive_web_twitter_article_notes_tab_enabled' => true, 'subscriptions_feature_can_gift_premium' => true, 'creator_subscriptions_tweet_preview_api_enabled' => true, 'responsive_web_graphql_skip_user_profile_image_extensions_enabled' => false, 'responsive_web_graphql_timeline_navigation_enabled' => true]);
+        $bio_toggles = json_encode(['withPayments' => false, 'withAuxiliaryUserLabels' => true]);
+    }
+
+    $variables = json_encode(['screen_name' => $screen_name, 'withGrokTranslatedBio' => true]);
+    $apiUrl = 'https://x.com/i/api/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName?variables=' . urlencode($variables) . '&features=' . urlencode($bio_features) . '&fieldToggles=' . urlencode($bio_toggles);
+
+    $args = [$curl_impersonate_binary, '-s'];
+    foreach ($headers as $h) {
+        $args[] = '-H';
+        $args[] = $h;
+    }
+    $args[] = $apiUrl;
+    $r = shell_exec(implode(' ', array_map('escapeshellarg', $args)));
+
+    $j = @json_decode($r, true);
+    if (!$j) {
+        echo "[get_x_title] bio json decode failed\n";
+        return false;
+    }
+    if (isset($j['errors'])) {
+        echo "[get_x_title] bio API errors: " . json_encode($j['errors']) . "\n";
+        return false;
+    }
+
+    $user = $j['data']['user']['result']['legacy'] ?? null;
+    if (!$user) {
+        echo "[get_x_title] no user data found\n";
+        return false;
+    }
+
+    $result = $j['data']['user']['result'];
+    $t = $result['core']['name'] ?? $result['legacy']['name'] ?? $result['name'] ?? 'Unknown';
+
+    if (!empty($user['description'])) {
+        $d = $user['description'];
+        if (!empty($user['entities']['description']['urls'])) {
+            foreach ($user['entities']['description']['urls'] as $v) {
+                $d = str_replace($v['url'], "{$v['url']} (" . get_url_hint($v['expanded_url']) . ")", $d);
+            }
+        }
+        $d = str_replace(["\r\n", "\n", "\t"], ' ', $d);
+        $d = html_entity_decode($d, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $d = trim(preg_replace('/\s+/', ' ', $d));
+        $t .= " | $d";
+    }
+
+    if (!empty($user['entities']['url']['urls'][0]['expanded_url'])) {
+        $url = preg_replace('#^(https?://[^/]*?)/$#', "$1", $user['entities']['url']['urls'][0]['expanded_url']);
+        $t .= " | $url";
+    }
+
+    return $t;
+}
+
+// Fetch X tweet
+function get_x_tweet($headers, $tweet_id)
+{
+    global $curl_impersonate_binary;
+    static $tweet_features = null, $tweet_toggles = null;
+    if (!$tweet_features) {
+        $tweet_features = json_encode(['creator_subscriptions_tweet_preview_api_enabled' => true, 'communities_web_enable_tweet_community_results_fetch' => true, 'c9s_tweet_anatomy_moderator_badge_enabled' => true, 'articles_preview_enabled' => true, 'responsive_web_edit_tweet_api_enabled' => true, 'graphql_is_translatable_rweb_tweet_is_translatable_enabled' => true, 'view_counts_everywhere_api_enabled' => true, 'longform_notetweets_consumption_enabled' => true, 'responsive_web_twitter_article_tweet_consumption_enabled' => true, 'standardized_nudges_misinfo' => true, 'tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled' => true, 'longform_notetweets_rich_text_read_enabled' => true, 'longform_notetweets_inline_media_enabled' => true, 'responsive_web_enhance_cards_enabled' => false]);
+        $tweet_toggles = json_encode(['withArticleRichContentState' => true, 'withArticlePlainText' => false, 'withGrokAnalyze' => false]);
+    }
+
+    $variables = json_encode(['tweetId' => $tweet_id, 'withCommunity' => false, 'includePromotedContent' => false, 'withVoice' => false]);
+    $apiUrl = 'https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId?variables=' . urlencode($variables) . '&features=' . urlencode($tweet_features) . '&fieldToggles=' . urlencode($tweet_toggles);
+
+    $args = [$curl_impersonate_binary, '-s'];
+    foreach ($headers as $h) {
+        $args[] = '-H';
+        $args[] = $h;
+    }
+    $args[] = $apiUrl;
+    $r = shell_exec(implode(' ', array_map('escapeshellarg', $args)));
+
+    $j = @json_decode($r, true);
+    if (!$j) {
+        echo "[get_x_title] json decode failed\n";
+        return false;
+    }
+    if (isset($j['errors'])) {
+        echo "[get_x_title] API errors: " . json_encode($j['errors']) . "\n";
+        return false;
+    }
+
+    $result = $j['data']['tweetResult']['result'] ?? null;
+    $legacy = $result['legacy'] ?? $result['tweet']['legacy'] ?? null;
+    if (!$legacy) {
+        echo "[get_x_title] no legacy data found\n";
+        return false;
+    }
+
+    $user_results = $result['core']['user_results']['result'] ?? $result['tweet']['core']['user_results']['result'] ?? null;
+    $user_name = $user_results['core']['name'] ?? $user_results['legacy']['name'] ?? 'Unknown';
+    $user_screen = $user_results['core']['screen_name'] ?? $user_results['legacy']['screen_name'] ?? 'unknown';
+
+    $text = $result['note_tweet']['note_tweet_results']['result']['text'] ?? $legacy['full_text'] ?? ''; // prefer long text
+    if (!empty($legacy['extended_entities']['media'])) {
+        foreach ($legacy['extended_entities']['media'] as $m) {
+            $text = str_replace($m['url'], '', $text);
+        }
+    }
+    $text = preg_replace('/^(?:@[^\s]+\s*)+/', '', $text); // remove @mentions
+    $text = html_entity_decode(trim(preg_replace('/\s+/', ' ', $text)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+    $qh = $ql = '';
+    if (!empty($legacy['quoted_status_id_str'])) {
+        $qh = "https://x.com/$user_screen/status/{$legacy['quoted_status_id_str']}";
+        $ql = ' (re ' . make_short_url($qh) . ')';
+    }
+
+    $hl = 0;
+    if (preg_match_all('#https?://t\.co/\S+#', $text, $lm)) {
+        foreach ($lm[0] as $tco) {
+            if (!empty($qh)) {
+                $tmp = '/^' . preg_quote($tco, '/') . '|' . preg_quote($tco, '/') . '$/';
+                $fu = get_final_url($tco, ['no_body' => 1]);
+                if ($fu == $qh && preg_match($tmp, $text)) {
+                    $text = trim(preg_replace($tmp, '', $text));
+                    continue;
+                }
+            } else {
+                $fu = get_final_url($tco, ['no_body' => 1]);
+            }
+            $s = make_short_url($fu);
+            $rep = mb_strlen($s) < mb_strlen($tco) ? $s : $fu;
+            $h = get_url_hint($fu);
+            if ($h <> get_url_hint($rep)) {
+                if (mb_strlen("$rep ($h)") < mb_strlen($fu)) {
+                    $text = str_replace($tco, "$rep ($h)", $text);
+                    $hl += mb_strlen($h) + 3;
+                } else {
+                    $text = str_replace($tco, $fu, $text);
+                }
+            } else {
+                $text = str_replace($tco, $rep, $text);
+            }
+        }
+    }
+
+    $media_str = '';
+    if (!empty($legacy['extended_entities']['media'])) {
+        $mcnt = count($legacy['extended_entities']['media']);
+        $mtyp = $legacy['extended_entities']['media'][0]['type'] ?? '';
+        $mtyp = $mtyp == 'photo' ? 'image' : ($mtyp == 'animated_gif' ? 'gif' : $mtyp);
+        $media_str = $mcnt > 0 ? ' ' . ($mcnt == 1 ? "($mtyp)" : "($mcnt {$mtyp}s)") : '';
+    }
+
+    // Calculate total space needed for media + quote
+    $reserved_space = mb_strlen($media_str) + mb_strlen($ql);
+
+    // Shorten the main text to fit, leaving room for media and quotes
+    $t = "$user_name: $text";
+    $t = str_shorten($t, mb_strlen($user_name) + 316 + $hl - $reserved_space);
+
+    // Now append media and quotes (guaranteed to not be cut)
+    $t = trim($t) . $media_str . $ql;
+
+    return $t;
 }
