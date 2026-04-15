@@ -1,7 +1,7 @@
 #!/usr/bin/php
 <?php
 
-// PHP Freenode IRC bot by dw1
+// PHP IRC bot by dw1
 chdir(dirname(__FILE__));
 set_time_limit(0);
 error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING);
