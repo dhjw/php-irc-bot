@@ -2968,19 +2968,32 @@ function title_sanitize($title, $url = "")
 
 function title_skip($title, $url)
 {
-    $parse_url = parse_url($url);
-    $skips = [$parse_url["host"],  'Login • Instagram', 'Access denied .* used Cloudflare to restrict access', 'Amazon.* Something Went Wrong.*', 'Sorry! Something went wrong!', 'Bloomberg - Are you a robot?', 'Attention Required! | Cloudflare', 'Access denied', 'Access Denied', 'Please Wait... | Cloudflare', 'Log into Facebook', 'DDOS-GUARD', 'Just a moment...', 'Amazon.com', 'Amazon.ca', 'Blocked - 4plebs', 'MSN', 'Access to this page has been denied', 'You are being redirected...', 'Instagram', 'The Donald', 'Facebook', 'Discord', 'Cloudflare capcha page', 'ChatGPT', 'Before you continue', 'Blocked', 'Verification Required', 'Log into Facebook.*', 'Captcha Page', 'ERROR: The request could not be satisfied', 'Verifying Device', 'Human Verification', 'Client Challenge', 'Verify Your Identity', 'Amazon Sign In', 'Access Restricted', 'Checking your connection', '403 - Forbidden', 'Error 403 - Forbidden', '403 Forbidden', 'Forbidden', 'Bad Request', '400 Bad Request', '400 - Bad Request', 'Error 400 - Bad Request', 'Are you over 18?'];
-    $skips_no_fallback = ['Imgur', 'Imgur: The .*', 'Gemini - direct access to Google AI', 'Age Verification | United States Department of Justice.*'];
+    $host = parse_url($url, PHP_URL_HOST);
+    $base = get_base_domain($host);
+
+    $skips = [
+        '^' . preg_quote($host) . '$',
+        '^(?:Error\s*)?[45]\d{2}.*?\w+(?: \w+){0,2}$', // 4xx/5xx catch-all
+        '^Login • Instagram$', '^Access denied.*Cloudflare$', '^Amazon.*(Something Went Wrong|Sign In|\.com|\.ca)$',
+        '^Sorry! Something went wrong!$', '^Bloomberg - Are you a robot\?$', '^Attention Required! \| Cloudflare$',
+        '^Access [Dd]enied$', '^Please Wait... \| Cloudflare$', '^Log into Facebook.*$', '^DDOS-GUARD$', 
+        '^Just a moment\.\.\.$', '^Blocked - 4plebs$', '^MSN$', '^Access to this page has been denied$', 
+        '^You are being redirected\.\.\.$', '^(Instagram|The Donald|Facebook|Discord|ChatGPT)$', 
+        '^Cloudflare capt?cha page$', '^Before you continue$', '^Blocked$', '^Verification Required$', 
+        '^Captcha Page$', '^ERROR: The request could not be satisfied$', '^Verifying Device$', 
+        '^Human Verification$', '^Client Challenge$', '^Verify Your Identity$', '^Access Restricted$',
+        '^Checking your connection$', '^Forbidden$', '^Bad Request$', '^Are you over 18\?$', '^JSTOR: Access Check$'
+    ];
+
     foreach ($skips as $s) {
-        if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($s)) . '$/', $title) || $title == get_base_domain($parse_url['host'])) {
-            return 1;
-        }
+        if (preg_match("/$s/i", $title) || $title == $base) return 1;
     }
-    foreach ($skips_no_fallback as $s) {
-        if (preg_match('/^' . str_replace('\.\*', '.*', preg_quote($s)) . '$/', $title)) {
-            return 2;
-        }
+
+    $no_fallback = ['^Imgur(: The .*)?$', '^Gemini.*AI$', '^Age Verification.*$'];
+    foreach ($no_fallback as $s) {
+        if (preg_match("/$s/i", $title)) return 2;
     }
+
     return 0;
 }
 
