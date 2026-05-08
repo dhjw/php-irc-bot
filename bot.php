@@ -1718,10 +1718,11 @@ while (1) {
                 }
 
                 // X (twitter)
-                if (!empty($x_enabled) && preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:(?:[^/]+/status(?:es)?/(\d+))|(\w+))#', $u, $m)) {
+                if (!empty($x_enabled) && preg_match('#^https?://(?:mobile\.)?(?:twitter|x)\.com/(?:(?:[^/]+/status(?:es)?/(\d+))|(?:i/broadcasts/([\w-]+))|(\w+))#', $u, $m)) {
                     $is_tweet = !empty($m[1]);
-                    $x_id = $is_tweet ? $m[1] : $m[2];
-                    echo "Getting X " . ($is_tweet ? "tweet" : "bio") . "...\n";
+                    $is_broadcast = !empty($m[2]);
+                    $x_id = $m[1] ?: ($m[2] ?: $m[3]);
+                    echo "Getting X " . ($is_tweet ? "tweet" : ($is_broadcast ? "broadcast" : "bio")) . "...\n";
                     if ($t = get_x_title($u, $x_id)) {
                         echo "Success\n";
                         $t = "[ $t ]";
@@ -3677,12 +3678,14 @@ function get_x_headers()
     }
 
     echo "[get_x_title] fetching new guest token\n";
+
     $args = [$curl_impersonate_binary, '-s', '-X', 'POST'];
     foreach ($base_headers as $h) {
         $args[] = '-H';
         $args[] = $h;
     }
     $args[] = 'https://api.x.com/1.1/guest/activate.json';
+    $args[] = 'https://api.twitter.com/1.1/guest/activate.json';
     $guest_token = @json_decode(shell_exec(implode(' ', array_map('escapeshellarg', $args))), true)['guest_token'] ?? null;
     if (!$guest_token) {
         echo "[get_x_title] failed to get guest token\n";
@@ -3699,6 +3702,10 @@ function get_x_title($u, $id)
 {
     $headers = get_x_headers();
     if (!$headers) return false;
+    if (strpos($u, '/i/broadcasts/') !== false) {
+        echo "[get_x_title] fetching broadcast $id\n";
+        return get_x_broadcast($headers, $id);
+    }
     if (!ctype_digit($id)) {
         echo "[get_x_title] fetching bio for @$id\n";
         return get_x_bio($headers, $id);
@@ -3754,6 +3761,30 @@ function get_x_bio($headers, $screen_name)
     }
 
     return $out;
+}
+
+/**
+ * Fetches X (Twitter) broadcast metadata.
+ */
+function get_x_broadcast($headers, $broadcast_id)
+{
+    global $curl_impersonate_binary;
+    $url = "https://api.x.com/1.1/broadcasts/show.json?ids=" . $broadcast_id;
+
+    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn($h) => ['-H', $h], $headers)), [$url]);
+    $res = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
+    $json = @json_decode($res, true);
+
+    $b = $json['broadcasts'][$broadcast_id] ?? null;
+    $b = $json['broadcasts'][$broadcast_id] ?? $json[$broadcast_id] ?? null;
+    if (!$b) return false;
+
+    $title = !empty($b['title']) ? $b['title'] : 'Broadcast';
+    $user = $b['user']['display_name'] ?? $b['user']['screen_name'] ?? 'Unknown';
+    $title = !empty($b['status']) ? $b['status'] : ($b['title'] ?? 'Broadcast');
+    $user = $b['user_display_name'] ?? $b['user']['display_name'] ?? $b['user']['screen_name'] ?? 'Unknown';
+    // $state = $b['state'] ?? ''; // RUNNING, ENDED
+    return trim(str_shorten("$user: $title", mb_strlen($user) + 316));
 }
 
 /**
