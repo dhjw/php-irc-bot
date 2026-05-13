@@ -2975,15 +2975,38 @@ function title_skip($title, $url)
     $skips = [
         '^' . preg_quote($host) . '$',
         '^(?:Error\s*)?[45]\d{2}.*?\w+(?: \w+){0,2}$', // 4xx/5xx catch-all
-        '^Login • Instagram$', '^Access denied.*Cloudflare$', '^Amazon.*(Something Went Wrong|Sign In|\.com|\.ca)$',
-        '^Sorry! Something went wrong!$', '^Bloomberg - Are you a robot\?$', '^Attention Required! \| Cloudflare$',
-        '^Access [Dd]enied$', '^Please Wait... \| Cloudflare$', '^Log into Facebook.*$', '^DDOS-GUARD$', 
-        '^Just a moment\.\.\.$', '^Blocked - 4plebs$', '^MSN$', '^Access to this page has been denied$', 
-        '^You are being redirected\.\.\.$', '^(Instagram|The Donald|Facebook|Discord|ChatGPT)$', 
-        '^Cloudflare capt?cha page$', '^Before you continue$', '^Blocked$', '^Verification Required$', 
-        '^Captcha Page$', '^ERROR: The request could not be satisfied$', '^Verifying Device$', 
-        '^Human Verification$', '^Client Challenge$', '^Verify Your Identity$', '^Access Restricted$',
-        '^Checking your connection$', '^Forbidden$', '^Bad Request$', '^Are you over 18\?$', '^JSTOR: Access Check$'
+        '^Login • Instagram$',
+        '^Access denied.*Cloudflare$',
+        '^Amazon.*(Something Went Wrong|Sign In|\.com|\.ca)$',
+        '^Sorry! Something went wrong!$',
+        '^Bloomberg - Are you a robot\?$',
+        '^Attention Required! \| Cloudflare$',
+        '^Access [Dd]enied$',
+        '^Please Wait... \| Cloudflare$',
+        '^Log into Facebook.*$',
+        '^DDOS-GUARD$',
+        '^Just a moment\.\.\.$',
+        '^Blocked - 4plebs$',
+        '^MSN$',
+        '^Access to this page has been denied$',
+        '^You are being redirected\.\.\.$',
+        '^(Instagram|The Donald|Facebook|Discord|ChatGPT)$',
+        '^Cloudflare capt?cha page$',
+        '^Before you continue$',
+        '^Blocked$',
+        '^Verification Required$',
+        '^Captcha Page$',
+        '^ERROR: The request could not be satisfied$',
+        '^Verifying Device$',
+        '^Human Verification$',
+        '^Client Challenge$',
+        '^Verify Your Identity$',
+        '^Access Restricted$',
+        '^Checking your connection$',
+        '^Forbidden$',
+        '^Bad Request$',
+        '^Are you over 18\?$',
+        '^JSTOR: Access Check$'
     ];
 
     foreach ($skips as $s) {
@@ -3714,6 +3737,41 @@ function get_x_title($u, $id)
     return get_x_tweet($headers, $id);
 }
 
+function expand_x_text_urls($text, $legacy, $result, &$hint_len = 0)
+{
+    $url_entities = array_merge(
+        $legacy['entities']['urls'] ?? [],
+        $result['note_tweet']['note_tweet_results']['result']['entity_set']['urls'] ?? []
+    );
+
+    foreach ($url_entities as $url) {
+        if (empty($url['url']) || empty($url['expanded_url'])) continue;
+        if (strpos($text, $url['url']) === false) continue;
+        $final_url = get_final_url($url['expanded_url'], ['no_body' => 1]);
+        $out_url = $final_url;
+        $hint_extra = 0;
+        $short_url = make_short_url($final_url);
+        if (mb_strlen($short_url) < mb_strlen($out_url)) {
+            $out_url = $short_url;
+        }
+        $hint = get_url_hint($final_url);
+        if ($hint <> get_url_hint($out_url)) {
+            if (mb_strlen("$out_url ($hint)") < mb_strlen($final_url)) {
+                $out_url = "$out_url ($hint)";
+                $hint_extra = mb_strlen($hint) + 3;
+            } else {
+                $out_url = $final_url;
+            }
+        }
+        $text = str_replace($url['url'], $out_url, $text, $replacements);
+        if ($replacements > 0) {
+            $hint_len += $hint_extra;
+        }
+    }
+
+    return $text;
+}
+
 // Fetch X user bio/profile
 function get_x_bio($headers, $screen_name)
 {
@@ -3818,8 +3876,8 @@ function get_x_tweet($headers, $tweet_id)
 
     // Handle Article title vs NoteTweet vs Standard text
     $art = $result['article']['article_results']['result'] ?? null;
-    $text = ($art && !empty($art['title'])) 
-        ? $art['title'] 
+    $text = ($art && !empty($art['title']))
+        ? $art['title']
         : ($result['note_tweet']['note_tweet_results']['result']['text'] ?? $legacy['full_text'] ?? '');
 
     // Resolve User metadata
@@ -3827,8 +3885,12 @@ function get_x_tweet($headers, $tweet_id)
     $u_name = $u_res['core']['name'] ?? $u_res['legacy']['name'] ?? 'Unknown';
     $u_screen = $u_res['core']['screen_name'] ?? $u_res['legacy']['screen_name'] ?? 'unknown';
 
-    // Strip media URLs and normalize whitespace/mentions
+    // Strip media URLs
     foreach ($legacy['extended_entities']['media'] ?? [] as $m) $text = str_replace($m['url'], '', $text);
+    // Expand URLs, then shorten and add hints where useful
+    $hl = 0;
+    $text = expand_x_text_urls($text, $legacy, $result, $hl);
+    // Normalize whitespace/mentions
     $text = html_entity_decode(trim(preg_replace('/\s+/', ' ', preg_replace('/^(?:@[^\s]+\s*)+/', '', $text))), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
     // Auto-translation
@@ -3853,7 +3915,7 @@ function get_x_tweet($headers, $tweet_id)
 
     // Handle Quoted Status
     $ql = ($qid = $legacy['quoted_status_id_str'] ?? null) ? ' (re ' . make_short_url("https://x.com/$u_screen/status/$qid") . ')' : '';
-    
+
     $suffix = ($tag ? " $tag" : "") . $m_str . $ql;
-    return trim(str_shorten("$u_name: $text", mb_strlen($u_name) + 316 - mb_strlen($suffix))) . $suffix;
+    return trim(str_shorten("$u_name: $text", mb_strlen($u_name) + 316 + $hl - mb_strlen($suffix))) . $suffix;
 }
