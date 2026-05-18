@@ -117,7 +117,8 @@ $imgen_cf_config = [
     "llm_enhance_baseurl" => "https://api.openai.com/v1",
     "llm_enhance_model" => "gpt-4o-mini",
     "llm_enhance_key" => "",
-    "llm_enhance_prompt" => "create a great image creation prompt up to 1000 chars from the following: `{original_prompt}`", // make sure to include {original_prompt}
+    "llm_enhance_prompt" => "create one, just one, great image creation prompt up to 1000 chars from the following, return only the prompt: `{original_prompt}`", // make sure to include {original_prompt}
+    
 ];
 
 if ($imgen_cf_config["is_gemini"] && !$imgen_cf_config["github_enabled"]) {
