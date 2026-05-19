@@ -3853,7 +3853,6 @@ function get_x_broadcast($headers, $broadcast_id)
     $json = @json_decode($res, true);
 
     $b = $json['broadcasts'][$broadcast_id] ?? null;
-    $b = $json['broadcasts'][$broadcast_id] ?? $json[$broadcast_id] ?? null;
     if (!$b) return false;
 
     $title = !empty($b['title']) ? $b['title'] : 'Broadcast';
