@@ -118,6 +118,11 @@ $imgen_cf_config = [
     "llm_enhance_model" => "gpt-4o-mini",
     "llm_enhance_key" => "",
     "llm_enhance_prompt" => "create one, just one, great image creation prompt up to 1000 chars from the following, return only the prompt: `{original_prompt}`", // make sure to include {original_prompt}
+    "llm_enhance_replacements" => [
+        '/\b(pepe\'?s?)(?: the frog)?\b/i' => "$1 (Pepe The Frog, the iconic cartoon meme character)",
+        '/\b(pepina\'?s?)\b/i' => "$1 (young, cute, female, version of Pepe The Frog, the iconic cartoon meme character)",
+        '/\bstonx\b/i' => "stonx (stonks/stocks)",
+    ],
     
 ];
 
@@ -233,7 +238,12 @@ function imgen_cf()
         // 3. LLM Enhancement
         if ($imgen_cf_config["llm_enhance_enabled"] && !empty($imgen_cf_config["llm_enhance_key"])) {
             $enhanced_args = $args;
-            if (preg_match('/\bpepe\'?s?(?: the frog)?\b/i', $enhanced_args)) $enhanced_args = preg_replace('/\b(pepe\'?s?)(?: the frog)?\b/i', "$1 (the iconic cartoon meme frog)", $enhanced_args);
+            if (!empty($imgen_cf_config["llm_enhance_replacements"])) {
+                foreach ($imgen_cf_config["llm_enhance_replacements"] as $pattern => $replacement) {
+                    $enhanced_args = preg_replace($pattern, $replacement, $enhanced_args);
+                }
+            }
+
             $enhanced_prompt = imgen_cf_enhance_prompt($enhanced_args);
             if ($enhanced_prompt !== false) {
                 echo "[imgen-cf-enhance] Original: $original_args\n";
