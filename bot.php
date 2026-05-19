@@ -2569,20 +2569,39 @@ function get_title_ai($url)
         "tools"    => [["url_context" => (object)[]]]
     ];
 
-    $response = curlget([
-        CURLOPT_URL        => "https://generativelanguage.googleapis.com/v1beta/models/$ai_page_titles_model:generateContent?key=" . trim($ai_page_titles_key),
-        CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
-        CURLOPT_POSTFIELDS => json_encode($payload),
-        CURLOPT_TIMEOUT    => 45
-    ], ["no_curl_impersonate" => 1]);
+    for ($i = 0; $i < 5; $i++) {
+        if ($i > 0) {
+            echo "[get_title_ai] Retrying AI request (" . ($i + 1) . "/3)...\n";
+            sleep(2);
+        }
 
-    $res = json_decode($response, true);
-    echo "[get_title_ai response] " . json_encode($res) . "\n";
+        $response = curlget([
+            CURLOPT_URL        => "https://generativelanguage.googleapis.com/v1beta/models/$ai_page_titles_model:generateContent?key=" . trim($ai_page_titles_key),
+            CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_TIMEOUT    => 45
+        ], ["no_curl_impersonate" => 1]);
 
-    $status = $res['candidates'][0]['urlContextMetadata']['urlMetadata'][0]['urlRetrievalStatus'] ?? '';
-    if ($status === 'URL_RETRIEVAL_STATUS_ERROR') {
-        echo "Gemini said URL retrieval error\n";
-        return '';
+        $res = json_decode($response, true);
+        echo "[get_title_ai response] " . json_encode($res) . "\n";
+
+        if (isset($res['error'])) {
+            $code = $res['error']['code'] ?? 0;
+            echo "[get_title_ai error] $code: {$res['error']['message']}\n";
+            if ($code >= 500 && $code < 600) {  // retry 5xx
+                usleep(500000);
+                continue;
+            }
+            return '';
+        }
+
+        $status = $res['candidates'][0]['urlContextMetadata']['urlMetadata'][0]['urlRetrievalStatus'] ?? '';
+        if ($status === 'URL_RETRIEVAL_STATUS_ERROR') {
+            echo "[get_title_ai error] URL retrieval error\n";
+            return '';
+        }
+
+        break;
     }
 
     $title = '';
