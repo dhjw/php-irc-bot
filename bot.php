@@ -3025,7 +3025,9 @@ function title_skip($title, $url)
         '^Forbidden$',
         '^Bad Request$',
         '^Are you over 18\?$',
-        '^JSTOR: Access Check$'
+        '^JSTOR: Access Check$',
+        '^Home$',
+        '^Making sure you\'re not a bot!$'
     ];
 
     foreach ($skips as $s) {
