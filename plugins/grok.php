@@ -165,7 +165,7 @@ function grok_query()
             "cache_key" => hash("crc32b", $trigger_idx . $channel),
             "history" => []
         ];
-        return send("PRIVMSG $target :Memory erased.\n");
+        return send("PRIVMSG $target :Memory erased\n");
     }
 
     // Idle timeout check

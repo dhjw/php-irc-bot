@@ -95,7 +95,7 @@ function openai_query()
     // Handle memory reset
     if ($openai_config["memory_enabled"] && $aa[0] == ".forget") {
         $openai_config["memory_items"][$target] = [];
-        return send("PRIVMSG $target :Memory erased for $target.\n");
+        return send("PRIVMSG $target :Memory erased\n");
     }
 
     // Handle manual paste force

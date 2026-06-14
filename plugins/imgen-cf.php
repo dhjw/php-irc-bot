@@ -119,11 +119,10 @@ $imgen_cf_config = [
     "llm_enhance_key" => "",
     "llm_enhance_prompt" => "create one, just one, great image creation prompt up to 1000 chars from the following, return only the prompt: `{original_prompt}`", // make sure to include {original_prompt}
     "llm_enhance_replacements" => [
-        '/\b(pepe\'?s?)(?: the frog)?\b/i' => "$1 (Pepe The Frog, the iconic cartoon meme character)",
-        '/\b(pepina\'?s?)\b/i' => "$1 (young, cute, female, version of Pepe The Frog, the iconic cartoon meme character)",
-        '/\bstonx\b/i' => "stonx (stonks/stocks)",
+        '/\b(pepe\'?s?)(?: the frog)?\b/i' => "$1 (Pepe The Frog, the iconic cartoon meme character, mention it specifically)",
+        '/\b(pepina\'?s?)\b/i'             => "$1 (young, cute, female, brunette, sparkly, version of Pepe The Frog, the iconic cartoon meme character, mention it specifically)",
+        '/\bstonx\b/i'                     => "stonx (stonks/stocks)",
     ],
-    
 ];
 
 if ($imgen_cf_config["is_gemini"] && !$imgen_cf_config["github_enabled"]) {
@@ -299,13 +298,13 @@ function imgen_cf()
                 foreach ($r->errors as $err) {
                     if (isset($err->message) && stripos($err->message, "used up your daily free allocation") !== false) {
                         echo "[imgen-cf-response] api error: daily free allocation used up. Caching reset timestamp.\n";
-                        
+
                         $now = new DateTime("now", new DateTimeZone("UTC"));
                         $reset = new DateTime("tomorrow 00:00:00", new DateTimeZone("UTC"));
-                        
+
                         // Set dynamic private config var
                         $imgen_cf_config["_limit_reset_ts"] = $reset->getTimestamp();
-                        
+
                         $diff = $now->diff($reset);
                         $countdown = $diff->format("%hh %im");
                         return send("PRIVMSG $target :Daily limit reached. Resets in $countdown (00:00 UTC)\n");
