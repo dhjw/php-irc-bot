@@ -67,13 +67,19 @@ $warp_by_hosts = [
 	// 'example.com'
 ];
 
-$ai_page_titles_enabled = false; // use AI to get page titles for certain hosts or fallback. gemini-only
+$ai_media_titles_enabled = false; // direct media link summaries/titles. jpg/png/webp/avif/gif images only unless $ai_media_titles_more_types enabled below
 $ai_page_titles_key = ''; // https://aistudio.google.com/apikey
 $ai_page_titles_model = 'gemini-2.5-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models
-$ai_page_titles_hosts = []; // set to 'all' or an array of hostnames. these will only try AI title retrieval (if no other handling). often just fallback below is fine
+$ai_page_titles_hosts = [ // set to 'all' or an array of hostnames. these will only try AI title retrieval (if no other handling). often just fallback below is fine
+	'archive.today',
+	'archive.fo',
+	'archive.is',
+	'archive.li',
+	'archive.md',
+	'archive.ph',
+	'archive.vn',
+];
 $ai_page_titles_fallback = true; // use AI title if normal title retrieval fails
-
-$ai_media_titles_enabled = false; // direct media link summaries/titles. jpg/png/webp/avif/gif images only unless $ai_media_titles_more_types enabled below
 $ai_media_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
 $ai_media_titles_baseurl = 'https://generativelanguage.googleapis.com/v1beta/openai'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
 $ai_media_titles_model = 'gemini-2.5-flash-lite'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
