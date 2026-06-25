@@ -689,7 +689,7 @@ while (1) {
             } elseif ($trigger == '!restart') {
                 dorestart($args);
             } elseif ($trigger == '!update') {
-                $r = curlget([CURLOPT_URL => 'https://raw.githubusercontent.com/dhjw/php-irc-bot/master/bot.php']);
+                $r = curlget([CURLOPT_URL => 'https://raw.githubusercontent.com/dhjw/php-irc-bot/main/bot.php']);
                 if (empty($r)) {
                     send("PRIVMSG $privto :Error downloading update\n");
                     continue;
