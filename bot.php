@@ -2180,6 +2180,24 @@ while (1) {
                     }
                 }
 
+                // cbs live updates
+                if (preg_match('/https:\/\/www\.cbsnews\.com\/live-updates\/[^\/]*\/#post-update-([a-f0-9]+)/i', $u, $m)) {
+                    $id = $m[1];
+                    $h = curlget([CURLOPT_URL => $u]);
+                    $d = new DOMDocument();
+                    @$d->loadHTML(mb_convert_encoding($h, 'HTML-ENTITIES', 'UTF-8'));
+                    $x = new DOMXPath($d);
+                    $n = $x->query("//a[@name='post-update-$id']/following-sibling::h2[contains(@class, 'post-update__headline')]");
+                    if ($n->length > 0) {
+                        $t = "[ " . trim($n->item(0)->nodeValue) . " ]";
+                        send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+                        if ($title_cache_enabled) {
+                            add_to_title_cache($u, $t);
+                        }
+                        continue (2);
+                    }
+                }
+
                 $og_title_urls_regex = ['#https?://(?:www\.)?brighteon\.com#', '#https?://(?:www\.)?campusreform\.org#',];
                 foreach ($og_title_urls_regex as $r) {
                     if (preg_match($r, $u)) {
