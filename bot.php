@@ -3236,7 +3236,10 @@ function format_extract($e, $len = 280, $opts = [])
 function tmdb_lookup($q, $is_id = false, $link = true)
 {
     global $tmdb_read_token, $baselen;
-    $req = fn($p, $a = []) => ($r = curlget([CURLOPT_URL => "https://api.themoviedb.org/3$p?" . http_build_query($a), CURLOPT_HTTPHEADER => ["Authorization: Bearer $tmdb_read_token", "accept: application/json"]])) ? json_decode($r) : null;
+    $req = function($p, $a = []) use ($tmdb_read_token) {
+        $r = curlget([CURLOPT_URL => "https://api.themoviedb.org/3$p?" . http_build_query($a), CURLOPT_HTTPHEADER => ["Authorization: Bearer $tmdb_read_token", "accept: application/json"]]);
+        return $r ? json_decode($r) : null;
+    };
 
     // 1. Resolve Winner
     if ($is_id || preg_match('/tt\d{7,10}/', $q, $m)) {
@@ -3244,12 +3247,70 @@ function tmdb_lookup($q, $is_id = false, $link = true)
         $w = $d->movie_results[0] ?? $d->tv_results[0] ?? $d->tv_episode_results[0] ?? null;
         if ($w) $w->media_type = isset($d->movie_results[0]) ? 'movie' : (isset($d->tv_results[0]) ? 'tv' : 'tv_episode');
     } else {
-        $y = preg_match('/\b(\d{4})\b/', $q, $m) ? $m[1] : null;
+        $y = null;
+        $orig_q = $q;
+        // Check for tv/movie BEFORE extracting year
         $tv = preg_match('/\b(tv|tv show)\b/i', $q);
         $mov = preg_match('/\bmovie\b/i', $q);
-        $q = trim(preg_replace(['/\b\d{4}\b/', '/\bmovie\b/i', '/\b(tv|tv show)\b/i', '/\s+/'], ['', '', '', ' '], $q));
-        $w = $req($mov ? '/search/movie' : ($tv ? '/search/tv' : '/search/multi'), ['query' => $q, ($tv ? 'first_air_date_year' : 'year') => $y])->results[0] ?? null;
-        if ($w && ($mov || $tv)) $w->media_type = $mov ? 'movie' : 'tv';
+        // Remove tv/movie keywords
+        $q = trim(preg_replace(['/\bmovie\b/i', '/\b(tv|tv show)\b/i'], ['', ''], $q));
+        // Now extract year
+        if (preg_match('/\(?\d{4}\)?\s*$/', $q, $m)) {
+            $y = preg_replace('/[^\d]/', '', $m[0]);
+            $q = trim(preg_replace('/\(?\d{4}\)?\s*$/', '', $q));
+            echo "[tmdb] year=$y query='$q'\n";
+        }
+        // Normalize whitespace
+        $q = trim(preg_replace('/\s+/', ' ', $q));
+        
+        // Override detection if query explicitly contains tv or movie
+        if ($mov) {
+            echo "[tmdb] overriding detection: movie\n";
+        } elseif ($tv) {
+            echo "[tmdb] overriding detection: tv\n";
+        }
+        
+        // If year was found, try movies first, then TV
+        if ($y && !$tv) {
+            $w = $req('/search/movie', ['query' => $q, 'year' => $y])->results[0] ?? null;
+            if ($w) {
+                $w->media_type = 'movie';
+            } else {
+                $w = $req('/search/tv', ['query' => $q, 'first_air_date_year' => $y])->results[0] ?? null;
+                if ($w) $w->media_type = 'tv';
+            }
+        } else {
+            // Use movie/tv specific search if specified in query, otherwise use multi
+            if ($mov) {
+                $w = $req('/search/movie', ['query' => $q, 'year' => $y])->results[0] ?? null;
+                if ($w) $w->media_type = 'movie';
+            } elseif ($tv) {
+                $w = $req('/search/tv', ['query' => $q, 'first_air_date_year' => $y])->results[0] ?? null;
+                if ($w) $w->media_type = 'tv';
+            } else {
+                $search_type = '/search/multi';
+                $year_param = $y ? 'year' : null;
+                $w = $req($search_type, array_filter(['query' => $q, 'year' => $y]))->results[0] ?? null;
+            }
+        }
+        
+        // Fallback to original query if nothing found
+        if (!$w && $y) {
+            echo "[tmdb] retry with full query='$orig_q'\n";
+            $q = trim(preg_replace(['/\bmovie\b/i', '/\b(tv|tv show)\b/i', '/\s+/'], ['', '', ' '], $orig_q));
+            if ($mov) {
+                $w = $req('/search/movie', ['query' => $q])->results[0] ?? null;
+                if ($w) $w->media_type = 'movie';
+            } elseif ($tv) {
+                $w = $req('/search/tv', ['query' => $q])->results[0] ?? null;
+                if ($w) $w->media_type = 'tv';
+            } else {
+                $w = $req('/search/multi', ['query' => $q])->results[0] ?? null;
+            }
+        }
+        // Ensure media_type override is applied if query specified movie/tv
+        if ($w && $mov) $w->media_type = 'movie';
+        if ($w && $tv) $w->media_type = 'tv';
     }
 
     if (!$w || !in_array($t = $w->media_type, ['movie', 'tv', 'tv_episode'])) return null;
