@@ -124,8 +124,6 @@ if (!empty($nitter_links_via_twitter)) {
 $short_url_token_index = 0;
 $reddit_token = '';
 $reddit_token_expires = 0;
-$spotify_token = '';
-$spotify_token_expires = 0;
 $max_download_size ??= 26214400; // 25MiB
 $amt_mt_regex = !empty($ai_media_titles_more_types) ? '|' . implode('|', explode(',', $ai_media_titles_more_types)) : '';
 $amt_supports_mp4 = !empty($ai_media_titles_more_types) && preg_match('/\bmp4\b/i', $ai_media_titles_more_types);
@@ -1508,59 +1506,6 @@ while (1) {
                     preg_match('/<a class="secondary-action" href="(.*?)"/', $html, $m);
                     if (!empty($m[1])) {
                         $u = $m[1];
-                    }
-                }
-
-                // spotify api
-                if (!empty($spotify_client_id) && preg_match("#^https://open.spotify.com/(\w+)/(\w+)#", $u, $m)) {
-                    if (in_array($m[1], ['artist', 'playlist', 'show', 'episode', 'album', 'track']) && preg_match("#^[\w]+$#", $m[2])) {
-                        if (empty($spotify_token) || $time >= $spotify_token_expires - 30) {
-                            $j = json_decode(curlget([
-                                CURLOPT_CUSTOMREQUEST => "POST",
-                                CURLOPT_URL => "https://accounts.spotify.com/api/token",
-                                CURLOPT_POSTFIELDS => "grant_type=client_credentials&client_id=$spotify_client_id&client_secret=$spotify_client_secret",
-                            ]));
-                            if (isset($j->access_token)) {
-                                $spotify_token = $j->access_token;
-                                $spotify_token_expires = $time + $j->expires_in;
-                            } else {
-                                $spotify_token = "";
-                                echo "Error getting Spotify token: " . print_r($j, true) . "\n";
-                            }
-                        }
-                        if ($spotify_token) {
-                            $r = json_decode(curlget([
-                                CURLOPT_URL => "https://api.spotify.com/v1/$m[1]s/$m[2]",
-                                CURLOPT_HTTPHEADER => ["Authorization: Bearer $spotify_token"]
-                            ]));
-                            if (isset($r->name)) {
-                                $r->name = trim($r->name); // an episode had a trailing space
-                                if ($m[1] == 'artist') {
-                                    $t = "[ {$r->name} ]";
-                                } elseif ($m[1] == 'playlist') {
-                                    $t = "[ {$r->name} ]";
-                                } elseif ($m[1] == 'show') {
-                                    $t = "[ {$r->name} ]";
-                                } elseif ($m[1] == 'episode') {
-                                    $t = "[ {$r->name} - {$r->show->name} ]";
-                                } elseif ($m[1] == 'album') {
-                                    $t = "[ {$r->name} - {$r->artists[0]->name} ]";
-                                } elseif ($m[1] == 'track') {
-                                    $t = "[ {$r->name} - {$r->artists[0]->name} ]";
-                                }
-                                send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                            } else {
-                                if (isset($r->error->status) && in_array($r->error->status, [400, 404])) {
-                                    $t = ucfirst($m[1]) . " not found.";
-                                } elseif (isset($r->error->message)) {
-                                    $t = "API error: {$r->error->message}";
-                                } else {
-                                    $t = "API error.";
-                                }
-                                send("PRIVMSG $channel :$t\n");
-                            }
-                            continue;
-                        }
                     }
                 }
 
@@ -3045,7 +2990,8 @@ function title_skip($title, $url)
         '^Are you over 18\?$',
         '^JSTOR: Access Check$',
         '^Home$',
-        '^Making sure you\'re not a bot!$'
+        '^Making sure you\'re not a bot!$',
+        'Spotify'
     ];
 
     foreach ($skips as $s) {
