@@ -50,6 +50,7 @@ $gemini_config = [
     "print_info" => true,
     "line_delay" => 500000, // Microseconds
     "curl_timeout" => 90,
+    "retries" => 16, // For connection and 5XX errors, as gem is unreliable
     "memory_items" => [] // State storage
 ];
 
@@ -67,7 +68,7 @@ if ($gemini_config["github_enabled"]) {
  */
 function gemini_query()
 {
-    global $target, $channel, $trigger, $incnick, $args, $gemini_config, $curl_error;
+    global $target, $channel, $trigger, $incnick, $args, $gemini_config, $curl_error, $curl_info;
 
     if (substr($target, 0, 1) !== "#") {
         return send("PRIVMSG $target :This command only works in $channel\n");
@@ -177,8 +178,9 @@ function gemini_query()
     echo "[" . $gemini_config["model"] . "] $target\n";
     $endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=" . $gemini_config["key"];
 
+    $max_retries = $gemini_config["retries"] ?? 16;
     $res = null;
-    for ($attempt = 1; $attempt <= 3; $attempt++) {
+    for ($attempt = 1; $attempt <= $max_retries; $attempt++) {
         $r = curlget([
             CURLOPT_URL => $endpoint,
             CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
@@ -187,9 +189,14 @@ function gemini_query()
         ], ["no_curl_impersonate" => 1]);
 
         $res = @json_decode($r);
+        $code = $curl_info['RESPONSE_CODE'] ?? 0;
+        $json_code = $res->error->code ?? 0;
+        $is_5xx = ($code >= 500 && $code < 600) || ($json_code >= 500 && $json_code < 600);
+        $is_conn = !empty($curl_error) || $code === 0;
+
         if (empty($res) || isset($res->error)) {
-            echo "[gemini] API error (attempt $attempt/3): " . substr($r, 0, 1000) . "\n";
-            if ($attempt < 3) {
+            echo "[gemini] API error (attempt $attempt/$max_retries): " . substr($r, 0, 1000) . "\n";
+            if (($is_5xx || $is_conn) && $attempt < $max_retries) {
                 usleep(500000);
                 continue;
             }
@@ -205,8 +212,8 @@ function gemini_query()
         }
 
         if ($content === "") {
-            echo "[gemini] Blank response (attempt $attempt/3)\n";
-            if ($attempt < 3) {
+            echo "[gemini] Blank response (attempt $attempt/$max_retries)\n";
+            if ($attempt < $max_retries) {
                 usleep(500000);
                 continue;
             }
