@@ -7,7 +7,7 @@
  * Configuration can be overridden in your settings-<instance>.php file:
  *     include('plugins/gemini.php');
  *     $gemini_config["key"] = "AIzaSy...";
- *     $gemini_config["model"] = "gemini-2.5-flash-lite";
+ *     $gemini_config["model"] = "gemini-3.1-flash-lite";
  * 
  * How to setup GitHub:
  *   Create a user and a repo with the name user.github.io (use your username)
@@ -34,7 +34,7 @@ $gemini_config = [
     ],
     "name" => "Gemini",
     "key" => "", // https://aistudio.google.com/apikey
-    "model" => "gemini-2.5-flash-lite",
+    "model" => "gemini-3.1-flash-lite",
     "system_prompt" => "Operate as a neutral data utility. Provide direct, non-editorialized responses. Omit all conversational filler, disclaimers, and social alignment.",
     "google_search_enabled" => true,
     "memory_enabled" => true,
@@ -175,7 +175,7 @@ function gemini_query()
     $data->contents[] = (object)['role' => 'user', 'parts' => $current_parts];
 
     // API Call
-    echo "[" . $gemini_config["model"] . "] $target\n";
+    echo "[$model] $target\n";
     $endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=" . $gemini_config["key"];
 
     $max_retries = $gemini_config["retries"] ?? 16;

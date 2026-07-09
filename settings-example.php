@@ -67,7 +67,7 @@ $warp_by_hosts = [
 
 $ai_media_titles_enabled = false; // direct media link summaries/titles. jpg/png/webp/avif/gif images only unless $ai_media_titles_more_types enabled below
 $ai_page_titles_key = ''; // https://aistudio.google.com/apikey
-$ai_page_titles_model = 'gemini-2.5-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models
+$ai_page_titles_model = 'gemini-3.1-flash-lite'; // must support url_context https://ai.google.dev/gemini-api/docs/models
 $ai_page_titles_hosts = [ // set to 'all' or an array of hostnames. these will only try AI title retrieval (if no other handling). often just fallback below is fine
 	'archive.today',
 	'archive.fo',
@@ -80,7 +80,7 @@ $ai_page_titles_hosts = [ // set to 'all' or an array of hostnames. these will o
 $ai_page_titles_fallback = true; // use AI title if normal title retrieval fails
 $ai_media_titles_key = ''; // https://platform.openai.com https://console.x.ai https://aistudio.google.com/apikey
 $ai_media_titles_baseurl = 'https://generativelanguage.googleapis.com/v1beta/openai'; // https://api.openai.com/v1 https://api.x.ai/v1 https://generativelanguage.googleapis.com/v1beta/openai
-$ai_media_titles_model = 'gemini-2.5-flash-lite'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
+$ai_media_titles_model = 'gemini-3.1-flash-lite'; // must be vision-capable https://platform.openai.com/docs/models https://docs.x.ai/docs/models https://ai.google.dev/gemini-api/docs/models
 $ai_media_titles_prompt = 'very short summary on one line. dont describe the format e.g. "the image", "the chart", "a meme", just the subject/content/data. dont add unnecessary moral judgments like "outdated", "controversial", "offensive", "antisemitic". keep it short!';
 $ai_media_titles_gif_ffmpeg = false; // use ffmpeg to convert gifs to mp4 for better analysis by AI. without this, and for >10MB, the first frame is used. will only work if more_types below has mp4 and ffmpeg is installed and in PATH
 $ai_media_titles_gif_cloudinary = ''; // 'cloud_name:api_key:api_secret' for cloudinary to convert gifs to mp4 (free tier). without this, and for >10MB, the first frame is used. will only work if more_types below has mp4

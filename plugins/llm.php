@@ -32,7 +32,7 @@ $llm_config = [
             "trigger" => "!gem",
             "api_type" => "gemini", // use native gemini endpoint
             "key" => "", // https://aistudio.google.com/apikey
-            "model" => "gemini-2.5-flash", // https://ai.google.dev/gemini-api/docs/models
+            "model" => "gemini-3.1-flash-lite", // https://ai.google.dev/gemini-api/docs/models
             "url_context_enabled" => false, // https://ai.google.dev/gemini-api/docs/url-context
             "google_search_enabled" => true, // https://ai.google.dev/gemini-api/docs/grounding
         ]
