@@ -1413,14 +1413,24 @@ while (1) {
 
                 // grokipedia
                 if (preg_match("#^https://grokipedia\.com/page/.*?(?:\#(.*))?$#", $u, $m)) {
+                    $u = strpos($u, '#') !== false ? substr($u, 0, strpos($u, '#')) : $u;
                     $html = curlget([CURLOPT_URL => $u]);
                     $dom = new DomDocument();
                     @$dom->loadHTML('<?xml version="1.0" encoding="UTF-8"?>' . $html);
                     $f = new DomXPath($dom);
                     $nl = $f->query("//article//h1");
+                    if (empty($m[1])) {
+                        $title_node = $f->query("//article//h1");
+                        if ($title_node->length > 0) {
+                            $t = '[ ' . trim($title_node->item(0)->textContent) . ' ]';
+                            send("PRIVMSG $channel :$title_bold$t$title_bold\n");
+                            if ($title_cache_enabled) add_to_title_cache($u, $t);
+                            continue;
+                        }
+                    }
                     if ($nl->length > 0) {
                         $h1 = $nl->item(0);
-                        $id = $m[1] ?? ($h1 instanceof DOMElement ? $h1->getAttribute('id') : '');
+                        $id = $m[1];
                         $nl = $f->query("//article//*[self::h1 or self::h2 or self::h3 or self::h4 or self::h5 or self::h6][@id='{$id}']")->item(0);
                         if ($nl) {
                             $t = '';
