@@ -34,10 +34,10 @@ $grok_config = [
     "triggers" => [
         "!grok",
         "!gr" => [
-            "system_prompt_override" => "{system_prompt}. Keep answer concise and on one line.",
+            "system_prompt_override" => "{system_prompt}. Keep answer under 10 sentences, one paragraph.",
         ],
         "!grk" => [
-            "system_prompt_override" => "{system_prompt}. Keep answer concise and on one line.",
+            "system_prompt_override" => "{system_prompt}. Keep answer under 10 sentences, one paragraph.",
         ],
     ],
     "name" => "Grok",
