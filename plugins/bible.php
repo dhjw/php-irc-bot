@@ -34,7 +34,8 @@ function bible()
 	}
 
 	// find the book searched for with loose matching on id and name
-	foreach ($bible_books->data as $book2) if (preg_match("/^" . preg_quote($book) . "/i", $book2->id) || preg_match("/^" . preg_quote($book) . "/i", $book2->name)) {
+	$book_pattern = str_replace(' ', '\s*', preg_replace('/^(\d+)\s*/', '$1\s*', preg_quote($book)));
+	foreach ($bible_books->data as $book2) if (preg_match("/^$book_pattern/i", $book2->id) || preg_match("/^$book_pattern/i", $book2->name)) {
 		$bookid = $book2->id;
 		break;
 	}
