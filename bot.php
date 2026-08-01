@@ -374,7 +374,7 @@ while (1) {
         }
 
         // got ops, run op queue
-        if (preg_match('/^:ChanServ!ChanServ@services[^ ]* MODE ' . preg_quote("$channel +o $nick") . '$/', rtrim($data))) {
+        if (preg_match('/^:ChanServ(?:![^ ]*)? MODE ' . preg_quote("$channel +o $nick") . '$/i', rtrim($data))) {
             echo "Got ops, running op queue\n";
             print_r($opqueue);
             $opped = true;
