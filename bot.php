@@ -991,7 +991,7 @@ while (1) {
                 continue;
             } elseif ($trigger == '!wa') {
                 // wolfram alpha
-                $u = "https://api.wolframalpha.com/v2/query?input=" . urlencode($args) . "&output=plaintext&appid=$wolfram_appid";
+                $u = "https://api.wolframalpha.com/v2/query?input=" . urlencode($args) . "&format=plaintext&appid=$wolfram_appid";
                 try {
                     $xml = new SimpleXMLElement(file_get_contents($u));
                 } catch (Exception $e) {
