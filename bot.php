@@ -3797,7 +3797,8 @@ function expand_x_text_urls($text, $legacy, $result, &$hint_len = 0)
 {
     $url_entities = array_merge(
         $legacy['entities']['urls'] ?? [],
-        $result['note_tweet']['note_tweet_results']['result']['entity_set']['urls'] ?? []
+        $result['note_tweet']['note_tweet_results']['result']['entity_set']['urls'] ?? [],
+        $result['tweet']['note_tweet']['note_tweet_results']['result']['entity_set']['urls'] ?? []
     );
 
     foreach ($url_entities as $url) {
@@ -3930,10 +3931,15 @@ function get_x_tweet($headers, $tweet_id)
     if (!$legacy) return false;
 
     // Handle Article title vs NoteTweet vs Standard text
-    $art = $result['article']['article_results']['result'] ?? null;
+    $art = $result['article']['article_results']['result'] ?? $result['tweet']['article']['article_results']['result'] ?? null;
+    $note = $result['note_tweet']['note_tweet_results']['result']['text'] ?? $result['tweet']['note_tweet']['note_tweet_results']['result']['text'] ?? null;
     $text = ($art && !empty($art['title']))
         ? $art['title']
-        : ($result['note_tweet']['note_tweet_results']['result']['text'] ?? $legacy['full_text'] ?? '');
+        : ($note ?? $legacy['full_text'] ?? '');
+
+    if (!$note && !$art && !empty($legacy['truncated'])) {
+        $text = rtrim($text, ' ;.,') . ' ...';
+    }
 
     // Resolve User metadata
     $u_res = $result['core']['user_results']['result'] ?? $result['tweet']['core']['user_results']['result'] ?? null;
