@@ -700,7 +700,7 @@ while (1) {
                     send("PRIVMSG $privto :Error writing updated bot.php\n");
                     continue;
                 }
-                send("PRIVMSG $privto :Update installed. See https://bit.ly/bupd8 for changes. Restarting\n");
+                send("PRIVMSG $privto :Update installed. See https://bit.ly/upda7 for changes. Restarting\n");
                 dorestart(!empty($args) ? $args : 'update');
             } elseif ($trigger == '!raw') {
                 send("$args\n");
