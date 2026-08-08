@@ -1109,7 +1109,9 @@ while (1) {
 
             for ($ui = 0; $ui < count($urls); $ui++) {
                 if (substr($orig_msg, -2) == '  ') {
-                    if ($ui === 0) echo "Skipping URL titles due to double space at end of line\n";
+                    if ($ui === 0) {
+                        echo "Skipping URL titles due to double space at end of line\n";
+                    }
                     continue;
                 }
                 $u = $urls[$ui];
@@ -1202,7 +1204,9 @@ while (1) {
                             } else {
                                 $o = '';
                             }
-                            if ($o == '.') $o = '';
+                            if ($o == '.') {
+                                $o = '';
+                            }
                             if (!empty($o)) {
                                 echo "ok\n";
                                 $o = "[ $o ]";
@@ -1424,7 +1428,9 @@ while (1) {
                         if ($title_node->length > 0) {
                             $t = '[ ' . trim($title_node->item(0)->textContent) . ' ]';
                             send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                            if ($title_cache_enabled) add_to_title_cache($u, $t);
+                            if ($title_cache_enabled) {
+                                add_to_title_cache($u, $t);
+                            }
                             continue;
                         }
                     }
@@ -1682,7 +1688,9 @@ while (1) {
                         echo "Success\n";
                         $t = "[ $t ]";
                         send("PRIVMSG $channel :$title_bold$t$title_bold\n");
-                        if ($title_cache_enabled) add_to_title_cache($u, $t);
+                        if ($title_cache_enabled) {
+                            add_to_title_cache($u, $t);
+                        }
                         continue;
                     }
                     echo "Failed\n";
@@ -2535,7 +2543,9 @@ function get_title_ai($url)
 {
     global $ai_page_titles_enabled, $ai_page_titles_key, $ai_page_titles_model;
 
-    if (!$ai_page_titles_enabled) return "ai disabled";
+    if (!$ai_page_titles_enabled) {
+        return "ai disabled";
+    }
 
     $payload = [
         "contents" => [["parts" => [["text" => "give me the exact html title tag from the URL. if it's not html, get the page title for the URL from google. return only json with the title under key 'title': $url"]]]],
@@ -2569,11 +2579,6 @@ function get_title_ai($url)
         }
 
         $status = $res['candidates'][0]['urlContextMetadata']['urlMetadata'][0]['urlRetrievalStatus'] ?? '';
-        if ($status === 'URL_RETRIEVAL_STATUS_ERROR') {
-            echo "[get_title_ai error] URL retrieval error\n";
-            return '';
-        }
-
         break;
     }
 
@@ -2587,9 +2592,20 @@ function get_title_ai($url)
     if (is_array($json) && isset($json['title'])) {
         $title = $json['title'];
     }
-    if ($title === '') $title = $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? '';
+    if ($title === '') {
+        $title = $res['candidates'][0]['groundingMetadata']['groundingChunks'][0]['web']['title'] ?? '';
+    }
 
     $title = trim(preg_replace('/\s+/', ' ', $title));
+    if ($status === 'URL_RETRIEVAL_STATUS_PAYWALL' && stripos($title, 'not found') !== false) {
+        echo "[get_title_ai error] Paywall and title not found\n";
+        return '';
+    }
+    if ($status === 'URL_RETRIEVAL_STATUS_ERROR' && ($title === '' || stripos($title, 'not found') !== false)) {
+        echo "[get_title_ai error] URL retrieval error and title not found\n";
+        return '';
+    }
+
     if (preg_match('#^https://archive\.(today|\w\w)/#', $url)) {
         $title = preg_replace('/ [^ ]+ Archive\.today$/i', '', $title);
     }
@@ -3005,12 +3021,16 @@ function title_skip($title, $url)
     ];
 
     foreach ($skips as $s) {
-        if (preg_match("/$s/i", $title) || $title == $base) return 1;
+        if (preg_match("/$s/i", $title) || $title == $base) {
+            return 1;
+        }
     }
 
     $no_fallback = ['^Imgur(: The .*)?$', '^Gemini.*AI$', '^Age Verification.*$'];
     foreach ($no_fallback as $s) {
-        if (preg_match("/$s/i", $title)) return 2;
+        if (preg_match("/$s/i", $title)) {
+            return 2;
+        }
     }
 
     return 0;
@@ -3192,7 +3212,7 @@ function format_extract($e, $len = 280, $opts = [])
 function tmdb_lookup($q, $is_id = false, $link = true)
 {
     global $tmdb_read_token, $baselen;
-    $req = function($p, $a = []) use ($tmdb_read_token) {
+    $req = function ($p, $a = []) use ($tmdb_read_token) {
         $r = curlget([CURLOPT_URL => "https://api.themoviedb.org/3$p?" . http_build_query($a), CURLOPT_HTTPHEADER => ["Authorization: Bearer $tmdb_read_token", "accept: application/json"]]);
         return $r ? json_decode($r) : null;
     };
@@ -3201,7 +3221,9 @@ function tmdb_lookup($q, $is_id = false, $link = true)
     if ($is_id || preg_match('/tt\d{7,10}/', $q, $m)) {
         $d = $req("/find/" . ($is_id ? $q : $m[0]), ['external_source' => 'imdb_id']);
         $w = $d->movie_results[0] ?? $d->tv_results[0] ?? $d->tv_episode_results[0] ?? null;
-        if ($w) $w->media_type = isset($d->movie_results[0]) ? 'movie' : (isset($d->tv_results[0]) ? 'tv' : 'tv_episode');
+        if ($w) {
+            $w->media_type = isset($d->movie_results[0]) ? 'movie' : (isset($d->tv_results[0]) ? 'tv' : 'tv_episode');
+        }
     } else {
         $y = null;
         $orig_q = $q;
@@ -3218,14 +3240,14 @@ function tmdb_lookup($q, $is_id = false, $link = true)
         }
         // Normalize whitespace
         $q = trim(preg_replace('/\s+/', ' ', $q));
-        
+
         // Override detection if query explicitly contains tv or movie
         if ($mov) {
             echo "[tmdb] overriding detection: movie\n";
         } elseif ($tv) {
             echo "[tmdb] overriding detection: tv\n";
         }
-        
+
         // If year was found, try movies first, then TV
         if ($y && !$tv) {
             $w = $req('/search/movie', ['query' => $q, 'year' => $y])->results[0] ?? null;
@@ -3233,65 +3255,93 @@ function tmdb_lookup($q, $is_id = false, $link = true)
                 $w->media_type = 'movie';
             } else {
                 $w = $req('/search/tv', ['query' => $q, 'first_air_date_year' => $y])->results[0] ?? null;
-                if ($w) $w->media_type = 'tv';
+                if ($w) {
+                    $w->media_type = 'tv';
+                }
             }
         } else {
             // Use movie/tv specific search if specified in query, otherwise use multi
             if ($mov) {
                 $w = $req('/search/movie', ['query' => $q, 'year' => $y])->results[0] ?? null;
-                if ($w) $w->media_type = 'movie';
+                if ($w) {
+                    $w->media_type = 'movie';
+                }
             } elseif ($tv) {
                 $w = $req('/search/tv', ['query' => $q, 'first_air_date_year' => $y])->results[0] ?? null;
-                if ($w) $w->media_type = 'tv';
+                if ($w) {
+                    $w->media_type = 'tv';
+                }
             } else {
                 $search_type = '/search/multi';
                 $year_param = $y ? 'year' : null;
                 $w = $req($search_type, array_filter(['query' => $q, 'year' => $y]))->results[0] ?? null;
             }
         }
-        
+
         // Fallback to original query if nothing found
         if (!$w && $y) {
             echo "[tmdb] retry with full query='$orig_q'\n";
             $q = trim(preg_replace(['/\bmovie\b/i', '/\b(tv|tv show)\b/i', '/\s+/'], ['', '', ' '], $orig_q));
             if ($mov) {
                 $w = $req('/search/movie', ['query' => $q])->results[0] ?? null;
-                if ($w) $w->media_type = 'movie';
+                if ($w) {
+                    $w->media_type = 'movie';
+                }
             } elseif ($tv) {
                 $w = $req('/search/tv', ['query' => $q])->results[0] ?? null;
-                if ($w) $w->media_type = 'tv';
+                if ($w) {
+                    $w->media_type = 'tv';
+                }
             } else {
                 $w = $req('/search/multi', ['query' => $q])->results[0] ?? null;
             }
         }
         // Ensure media_type override is applied if query specified movie/tv
-        if ($w && $mov) $w->media_type = 'movie';
-        if ($w && $tv) $w->media_type = 'tv';
+        if ($w && $mov) {
+            $w->media_type = 'movie';
+        }
+        if ($w && $tv) {
+            $w->media_type = 'tv';
+        }
     }
 
-    if (!$w || !in_array($t = $w->media_type, ['movie', 'tv', 'tv_episode'])) return null;
+    if (!$w || !in_array($t = $w->media_type, ['movie', 'tv', 'tv_episode'])) {
+        return null;
+    }
 
     // 2. Fetch Details
     $d = ($t == 'tv_episode') ? $req("/tv/$w->show_id", ['append_to_response' => 'credits,external_ids']) : $req("/$t/$w->id", ['append_to_response' => 'credits,external_ids']);
-    if (!$d) return null;
+    if (!$d) {
+        return null;
+    }
 
     // 3. Build Metadata
-    $yr = fn($s, $e, $st, $p) => $s ? ($st == 'Returning Series' || $p ? "$s-" : ($e && $e != $s ? "$s-$e" : $s)) : '';
+    $yr = fn ($s, $e, $st, $p) => $s ? ($st == 'Returning Series' || $p ? "$s-" : ($e && $e != $s ? "$s-$e" : $s)) : '';
     $y_range = ($t == 'movie') ? (substr($d->release_date ?? '', 0, 4)) : $yr(substr($d->first_air_date ?? '', 0, 4), substr($d->last_air_date ?? '', 0, 4), $d->status ?? '', !empty($d->in_production));
 
     $res = ["▶ " . ($d->title ?? $d->name ?? $w->name) . " (" . ($t == 'movie' ? ($y_range ?: 'Movie') : "TV $y_range") . ")"];
-    if ($t == 'tv_episode') $res[] = sprintf("S%02dE%02d %s", $w->season_number, $w->episode_number, $w->name);
-    if ($g = array_column($d->genres ?? [], 'name')) $res[] = implode(', ', $g);
-    if ($c = array_slice(array_column($d->credits->cast ?? [], 'name'), 0, 3)) $res[] = implode(', ', $c);
+    if ($t == 'tv_episode') {
+        $res[] = sprintf("S%02dE%02d %s", $w->season_number, $w->episode_number, $w->name);
+    }
+    if ($g = array_column($d->genres ?? [], 'name')) {
+        $res[] = implode(', ', $g);
+    }
+    if ($c = array_slice(array_column($d->credits->cast ?? [], 'name'), 0, 3)) {
+        $res[] = implode(', ', $c);
+    }
 
     // 4. Tail & Overview (Character Math)
     $tail = [isset($w->vote_average) || isset($d->vote_average) ? number_format($d->vote_average ?? $w->vote_average, 1) : null];
-    if ($link) $tail[] = ($imdb = $d->imdb_id ?? $d->external_ids->imdb_id ?? null) ? "https://imdb.com/title/$imdb" : null;
+    if ($link) {
+        $tail[] = ($imdb = $d->imdb_id ?? $d->external_ids->imdb_id ?? null) ? "https://imdb.com/title/$imdb" : null;
+    }
     $tail = array_filter($tail);
 
     $ov = $w->overview ?? $d->overview ?? '';
     $avail = 502 - $baselen - strlen(implode(' | ', array_merge($res, $tail))) - 5;
-    if ($ov) $res[] = '"' . str_shorten($ov, max(0, $avail)) . '"';
+    if ($ov) {
+        $res[] = '"' . str_shorten($ov, max(0, $avail)) . '"';
+    }
 
     return array_merge($res, $tail);
 }
@@ -3471,8 +3521,12 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
     global $ai_media_titles_key, $ai_media_titles_baseurl, $ai_media_titles_model, $ai_media_titles_prompt, $ai_media_titles_more_types, $amt_mt_regex, $amt_supports_mp4, $parse_url, $ai_media_titles_gif_ffmpeg, $ai_media_titles_gif_cloudinary;
 
     if (true) {
-        if (!$image_data && !($image_data = curlget([CURLOPT_URL => $url]))) return false;
-        if (!$mime) $mime = (new finfo(FILEINFO_MIME_TYPE))->buffer($image_data);
+        if (!$image_data && !($image_data = curlget([CURLOPT_URL => $url]))) {
+            return false;
+        }
+        if (!$mime) {
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->buffer($image_data);
+        }
 
         $converted = false;
 
@@ -3509,7 +3563,9 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
             $p = ['eager' => 'f_mp4', 'public_id' => $pid, 'timestamp' => $ts];
             ksort($p);
             $sig_str = "";
-            foreach ($p as $k => $v) $sig_str .= "$k=$v&";
+            foreach ($p as $k => $v) {
+                $sig_str .= "$k=$v&";
+            }
             $sig = sha1(rtrim($sig_str, '&') . $secret);
 
             echo "[get_ai_media_title cloudinary request] " . json_encode(array_merge($p, ['api_key' => $key, 'signature' => $sig, 'file' => 'base64_truncated'])) . "\n";
@@ -3545,7 +3601,9 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
 
         if (!$converted && strpos($mime, 'video/') === false && preg_match("#^\w+/(?:jpeg|png|webp|avif|gif" . ($ai_media_titles_more_types ? $amt_mt_regex : "") . ")$#", $mime)) {
             if (preg_match("#^\w+/(?:webp|avif|gif)#", $mime) && ($im = @imagecreatefromstring($image_data))) {
-                if ($mime == 'image/gif' && !empty($ai_media_titles_gif_cloudinary)) echo "[get_ai_media_title] Fallback: Using first frame\n";
+                if ($mime == 'image/gif' && !empty($ai_media_titles_gif_cloudinary)) {
+                    echo "[get_ai_media_title] Fallback: Using first frame\n";
+                }
                 ob_start();
                 imagepng($im);
                 $image_data = ob_get_clean();
@@ -3571,7 +3629,9 @@ function get_ai_media_title($url, $image_data = null, $mime = null)
 
         $res = json_decode($ai_raw);
         echo "[get_ai_media_title response] " . json_encode($res) . "\n";
-        if ($title = $res->choices[0]->message->content ?? null) return preg_replace('/\s+/', ' ', rtrim($title, '.'));
+        if ($title = $res->choices[0]->message->content ?? null) {
+            return preg_replace('/\s+/', ' ', rtrim($title, '.'));
+        }
         sleep(2);
     }
     return false;
@@ -3780,7 +3840,9 @@ function get_x_headers()
 function get_x_title($u, $id)
 {
     $headers = get_x_headers();
-    if (!$headers) return false;
+    if (!$headers) {
+        return false;
+    }
     if (strpos($u, '/i/broadcasts/') !== false) {
         echo "[get_x_title] fetching broadcast $id\n";
         return get_x_broadcast($headers, $id);
@@ -3802,8 +3864,12 @@ function expand_x_text_urls($text, $legacy, $result, &$hint_len = 0)
     );
 
     foreach ($url_entities as $url) {
-        if (empty($url['url']) || empty($url['expanded_url'])) continue;
-        if (strpos($text, $url['url']) === false) continue;
+        if (empty($url['url']) || empty($url['expanded_url'])) {
+            continue;
+        }
+        if (strpos($text, $url['url']) === false) {
+            continue;
+        }
         $final_url = get_final_url($url['expanded_url'], ['no_body' => 1]);
         $out_url = $final_url;
         $hint_extra = 0;
@@ -3843,13 +3909,15 @@ function get_x_bio($headers, $screen_name)
     $vars = json_encode(['screen_name' => $screen_name, 'withGrokTranslatedBio' => true]);
     $url = "https://x.com/i/api/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName?variables=" . urlencode($vars) . "&features=" . urlencode($features) . "&fieldToggles=" . urlencode($toggles);
 
-    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn($h) => ['-H', $h], $headers)), [$url]);
+    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn ($h) => ['-H', $h], $headers)), [$url]);
     $res = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
     $json = @json_decode($res, true);
 
     $res_data = $json['data']['user']['result'] ?? null;
     $legacy = $res_data['legacy'] ?? null;
-    if (!$legacy) return false;
+    if (!$legacy) {
+        return false;
+    }
 
     // Name
     $out = $res_data['core']['name'] ?? $legacy['name'] ?? 'Unknown';
@@ -3886,12 +3954,14 @@ function get_x_broadcast($headers, $broadcast_id)
     global $curl_impersonate_binary;
     $url = "https://api.x.com/1.1/broadcasts/show.json?ids=" . $broadcast_id;
 
-    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn($h) => ['-H', $h], $headers)), [$url]);
+    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn ($h) => ['-H', $h], $headers)), [$url]);
     $res = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
     $json = @json_decode($res, true);
 
     $b = $json['broadcasts'][$broadcast_id] ?? null;
-    if (!$b) return false;
+    if (!$b) {
+        return false;
+    }
 
     $title = !empty($b['title']) ? $b['title'] : 'Broadcast';
     $user = $b['user']['display_name'] ?? $b['user']['screen_name'] ?? 'Unknown';
@@ -3920,15 +3990,19 @@ function get_x_tweet($headers, $tweet_id)
     $url = "https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId?variables=" . urlencode($vars) . "&features=" . urlencode($f) . "&fieldToggles=" . urlencode($t);
 
     // Execute request via curl-impersonate
-    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn($h) => ['-H', $h], $headers)), [$url]);
+    $cmd = array_merge([$curl_impersonate_binary, '-s'], array_merge(...array_map(fn ($h) => ['-H', $h], $headers)), [$url]);
     $res = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
     $json = @json_decode($res, true);
 
-    if (!$json || isset($json['errors'])) return false;
+    if (!$json || isset($json['errors'])) {
+        return false;
+    }
 
     $result = $json['data']['tweetResult']['result'] ?? null;
     $legacy = $result['legacy'] ?? $result['tweet']['legacy'] ?? null;
-    if (!$legacy) return false;
+    if (!$legacy) {
+        return false;
+    }
 
     // Handle Article title vs NoteTweet vs Standard text
     $art = $result['article']['article_results']['result'] ?? $result['tweet']['article']['article_results']['result'] ?? null;
@@ -3947,7 +4021,9 @@ function get_x_tweet($headers, $tweet_id)
     $u_screen = $u_res['core']['screen_name'] ?? $u_res['legacy']['screen_name'] ?? 'unknown';
 
     // Strip media URLs
-    foreach ($legacy['extended_entities']['media'] ?? [] as $m) $text = str_replace($m['url'], '', $text);
+    foreach ($legacy['extended_entities']['media'] ?? [] as $m) {
+        $text = str_replace($m['url'], '', $text);
+    }
     // Expand URLs, then shorten and add hints where useful
     $hl = 0;
     $text = expand_x_text_urls($text, $legacy, $result, $hl);
