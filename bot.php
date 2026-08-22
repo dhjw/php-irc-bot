@@ -1550,9 +1550,13 @@ while (1) {
                     }
                 }
 
-                // reddit share urls - get final url
+                // reddit share, video & short urls - get final url or rewrite
                 if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/[^/]*?/s/#", $u, $m)) {
                     $u = get_final_url($u, ['header' => [$reddit_token ? "Authorization: Bearer $reddit_token" : ""]]);
+                } elseif (preg_match("#^https://v\.redd\.it/([^/?]+)#", $u, $m)) {
+                    $u = "https://www.reddit.com/video/$m[1]";
+                } elseif (preg_match("#^https://redd\.it/([^/?]+)#", $u, $m)) {
+                    $u = "https://www.reddit.com/comments/$m[1]";
                 }
 
                 // reddit authed - use oauth subdomain
@@ -1561,7 +1565,7 @@ while (1) {
                 }
 
                 // reddit image
-                if (strpos($u, '.redd.it/') !== false) {
+                if (strpos($u, 'i.redd.it/') !== false || strpos($u, 'preview.redd.it/') !== false) {
                     echo "getting reddit image title\n";
                     $q = substr($u, strpos($u, '.redd.it') + 1);
                     if (strpos($q, '?') !== false) {
@@ -1627,7 +1631,7 @@ while (1) {
                 }
 
                 // reddit title
-                if (preg_match("#^https://(?:\w+\.)?reddit\.com/r/.*?/comments/[^/?]+#", $u, $m)) {
+                if (preg_match("#^https://(?:\w+\.)?reddit\.com/(?:(?:r/.*?/)?comments|video|gallery)/[^/?]+#", $u, $m)) {
                     echo "getting reddit post title\n";
                     if (strpos($u, '?') !== false) {
                         $u = substr($u, 0, strpos($u, '?'));
@@ -1635,11 +1639,12 @@ while (1) {
                     for ($i = 2; $i > 0; $i--) { // 2 tries
                         $j = json_decode(curlget([CURLOPT_URL => "$u.json", CURLOPT_HTTPHEADER => ["Cookie: _options=%7B%22pref_quarantine_optin%22%3A%20true%7D", $reddit_token ? "Authorization: Bearer $reddit_token" : ""]]));
                         if (!empty($j)) {
-                            if (!is_array($j) || !isset($j[0]->data->children[0]->data->title)) {
+                            $post_data = is_array($j) ? ($j[0]->data->children[0]->data ?? null) : ($j->data->children[0]->data ?? null);
+                            if (empty($post_data->title)) {
                                 echo "unknown error. response=" . print_r($j, true);
                                 break;
                             }
-                            $t = $j[0]->data->children[0]->data->title;
+                            $t = $post_data->title;
                             $t = format_extract($t, 280, ['keep_quotes' => 1]);
                             if (!empty($t)) {
                                 $t = "[ $t ]";
