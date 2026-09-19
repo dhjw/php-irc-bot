@@ -3022,7 +3022,10 @@ function title_skip($title, $url)
         '^JSTOR: Access Check$',
         '^Home$',
         '^Making sure you\'re not a bot!$',
-        'Spotify'
+        '^Spotify$',
+        '^archive.\w+$',
+        '^Subscribe to read$',
+        '^Browser check'
     ];
 
     foreach ($skips as $s) {
