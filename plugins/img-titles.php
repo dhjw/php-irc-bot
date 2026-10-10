@@ -3,7 +3,7 @@
 /**
  * output titles for image links hosted on github pages
  * note this specifically expects a certain directory structure in the repo; see imgen-cf.php for the layout logic
- * it was created becaues i am currently doing all image generatoin and uploading locally and still want titles
+ * it was created because i am currently doing all image generation and uploading locally and still want titles
  *
  * note $img_titles_config vars can be modified after plugin inclusion in bot settings file without changing this file
  * see https://github.com/dhjw/php-irc-bot?tab=readme-ov-file#including-plugin-files
