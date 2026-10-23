@@ -824,26 +824,28 @@ while (1) {
                     continue;
                 }
                 for ($i = $num_file_get_retries; $i > 0; $i--) {
-                    $tmp = file_get_contents("https://www.googleapis.com/youtube/v3/search?q=" . urlencode($args) . "&part=snippet&maxResults=1&type=video&key=$youtube_api_key");
-                    $tmp = json_decode($tmp);
+                    $tmp = json_decode(curlget([
+                        CURLOPT_URL => "https://www.googleapis.com/youtube/v3/search?q=" . urlencode($args) . "&part=snippet&maxResults=1&type=video&key=$youtube_api_key",
+                    ]));
                     if (!empty($tmp)) {
                         break;
                     } elseif ($i > 1) {
                         sleep(1);
                     }
                 }
-                $v = $tmp->items[0]->id->videoId;
-                if (empty($tmp)) {
+                if (empty($tmp) || !empty($tmp->error)) {
                     send("PRIVMSG $privto :[ Temporary YouTube API error ]\n");
                     continue;
-                } elseif (empty($v)) {
+                }
+                $v = $tmp->items[0]->id->videoId ?? null;
+                if (empty($v)) {
                     send("PRIVMSG $privto :There were no results matching the query.\n");
                     continue;
                 }
                 for ($i = $num_file_get_retries; $i > 0; $i--) {
-                    $tmp2 = file_get_contents("https://www.googleapis.com/youtube/v3/videos?id=$v&part=contentDetails,statistics&key=$youtube_api_key");
-                    $tmp2 = json_decode($tmp2);
-                    print_r($tmp2);
+                    $tmp2 = json_decode(curlget([
+                        CURLOPT_URL => "https://www.googleapis.com/youtube/v3/videos?id=$v&part=contentDetails,statistics&key=$youtube_api_key",
+                    ]));
                     if (!empty($tmp2)) {
                         break;
                     } elseif ($i > 1) {
@@ -851,12 +853,16 @@ while (1) {
                     }
                 }
                 $ytextra = '';
-                $dur = covtime($tmp2->items[0]->contentDetails->duration);
-                if ($dur <> '0:00') {
+                $dur = !empty($tmp2->items[0]->contentDetails->duration) ? covtime($tmp2->items[0]->contentDetails->duration) : '';
+                if ($dur <> '' && $dur <> '0:00') {
                     $ytextra .= " | $dur";
                 }
-                $ytextra .= " | {$tmp->items[0]->snippet->channelTitle}";
-                $ytextra .= " | " . number_format($tmp2->items[0]->statistics->viewCount) . " views";
+                if (!empty($tmp->items[0]->snippet->channelTitle)) {
+                    $ytextra .= " | {$tmp->items[0]->snippet->channelTitle}";
+                }
+                if (isset($tmp2->items[0]->statistics->viewCount)) {
+                    $ytextra .= " | " . number_format($tmp2->items[0]->statistics->viewCount) . " views";
+                }
                 $title = html_entity_decode($tmp->items[0]->snippet->title, ENT_QUOTES);
                 send("PRIVMSG $privto :https://youtu.be/$v | $title$ytextra\n");
                 continue;
@@ -1296,15 +1302,14 @@ while (1) {
                     }
                     if (!empty($yt)) {
                         if ($yt == 'v') {
-                            $r = file_get_contents("https://www.googleapis.com/youtube/v3/videos?id=$m[1]&part=snippet,contentDetails,localizations&maxResults=1&type=video&key=$youtube_api_key");
+                            $r = json_decode(curlget([CURLOPT_URL => "https://www.googleapis.com/youtube/v3/videos?id=$m[1]&part=snippet,contentDetails,localizations&maxResults=1&type=video&key=$youtube_api_key"]));
                         } elseif (in_array($yt, ['c', 'u', 'h'])) {
-                            $r = file_get_contents("https://www.googleapis.com/youtube/v3/channels?" . ($yt == 'c' ? 'id' : ($yt == 'u' ? 'forUsername' : 'forHandle')) . "=$m[1]&part=id,snippet,localizations&maxResults=1&key=$youtube_api_key");
+                            $r = json_decode(curlget([CURLOPT_URL => "https://www.googleapis.com/youtube/v3/channels?" . ($yt == 'c' ? 'id' : ($yt == 'u' ? 'forUsername' : 'forHandle')) . "=$m[1]&part=id,snippet,localizations&maxResults=1&key=$youtube_api_key"]));
                         } elseif ($yt == 'p') {
-                            $r = file_get_contents("https://www.googleapis.com/youtube/v3/playlists?id=$m[1]&part=snippet,localizations&key=$youtube_api_key");
+                            $r = json_decode(curlget([CURLOPT_URL => "https://www.googleapis.com/youtube/v3/playlists?id=$m[1]&part=snippet,localizations&key=$youtube_api_key"]));
                         }
-                        $r = json_decode($r);
                         $s = false;
-                        if (empty($r)) {
+                        if (empty($r) || !empty($r->error)) {
                             send("PRIVMSG $channel :[ Temporary YouTube API error ]\n");
                             continue;
                         } elseif (empty($r->items)) {
@@ -2517,10 +2522,13 @@ function curlget($opts = [], $more_opts = [])
     }
 
     // both methods
-    if (parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_HOST) == 'consent.youtube.com') {
-        parse_str(parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_QUERY), $q);
-        if (isset($q['continue'])) {
-            $curl_info['EFFECTIVE_URL'] = $q['continue'];
+    if (!empty($curl_info['EFFECTIVE_URL']) && parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_HOST) == 'consent.youtube.com') {
+        $query = parse_url($curl_info['EFFECTIVE_URL'], PHP_URL_QUERY);
+        if (!empty($query)) {
+            parse_str($query, $q);
+            if (isset($q['continue'])) {
+                $curl_info['EFFECTIVE_URL'] = $q['continue'];
+            }
         }
     }
     if (!empty($curl_error)) {
